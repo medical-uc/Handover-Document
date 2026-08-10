@@ -1,0 +1,103 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\usepackage{titling}
+\usepackage{graphicx}
+
+\setlength{\droptitle}{-4em}    % Move title upward
+\setlength{\parskip}{0.5em}
+\setlength{\parindent}{0pt}
+\posttitle{\par\vspace{-3em}}   % Reduce space after title
+
+\titleformat{name=\section,numberless}
+    {\huge\bfseries\centering}
+    {}{0pt}{}
+
+\titleformat{\subsection}{\Large\bfseries}{}{0pt}{}
+
+\titleformat{\subsubsection}
+    {\normalfont\large\bfseries}
+    {}{0em}{}
+
+
+\title{\fontsize{36pt}{42pt}\selectfont\bfseries{Project Handover Document}}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\subsection*{Project Name}
+
+\textit{Write the name of your project here}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection*{Project Contributors}
+
+\begin{itemize}[leftmargin=*]
+    \item Michael Eko Hartono Gunawan
+    \item Ghazali Ahlam Jazali
+    \item Darrell Cornelius Rivaldo
+\end{itemize}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection*{Stakeholders}
+
+\begin{itemize}[leftmargin=*]
+    \item dr. Florence Pribadi, M.Si.
+    \item dr. Maria Jessica Rachman, M.Si.
+\end{itemize}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection*{Project Period}
+
+\begin{tabular}{ll}
+Start Date & : 15-07-2026 \\
+End Date & : 21-08-2026
+\end{tabular}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection*{Deliverable Checklist}
+
+\begin{longtable}{|p{0.35\linewidth}|p{0.55\linewidth}|}
+\hline
+\textbf{Item} & \textbf{Location} \\
+\hline
+Raw Data & Link to artifact location \\
+\hline
+Preprocessed Data & Link to artifact location \\
+\hline
+Model Experiment Notebooks & Link to artifact location \\
+\hline
+Apps Source Code & Link to artifact location \\
+\hline
+License & Link to artifact location \\
+\hline
+Access Ownership & Link to artifact location \\
+\hline
+\end{longtable}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\input{executive-summary}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\input{project-overview}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\input{aiml-solution}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\input{aiml-system}
+
+\end{document}
