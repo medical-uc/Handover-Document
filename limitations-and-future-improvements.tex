@@ -1,0 +1,38 @@
+%% ============================================================
+%%  Limitations and Future Improvements
+%%  MediQuiz: Intelligent Tutoring System for Medical Students
+%% ============================================================
+
+\section*{Limitations and Future Improvements}
+
+\subsection*{Limitations}
+
+\begin{itemize}
+    \item \textbf{Absence of Bahasa Indonesia Localization (Monolingual English Pipeline):}
+          The offline knowledge extraction and question generation pipelines (utilising HuatuoGPT-o1-72B and Qwen3.5-27B) as well as the client user interface operate exclusively in English. Consequently, the platform cannot directly ingest Indonesian-language medical textbooks or support students who prefer native-language instructional materials and localized clinical terminology.
+
+    \item \textbf{Absence of Multimodal and Visual Question Generation:}
+          Medical education relies heavily on visual comprehension, including anatomical diagrams, histological micrographs, diagnostic imaging, and biochemical pathways. While the ingestion pipeline parses structural headings and textual narratives from source textbooks, non-textual figures are currently stripped during document cleaning. The system is therefore unable to formulate visual questions or multimodal clinical case questions that require interpreting images, charts, and diagrams.
+
+    \item \textbf{Cold-Start Latency in Bayesian Knowledge Tracing (BKT):}
+          The student personalization engine leverages Bayesian Knowledge Tracing to infer latent mastery probabilities across granular medical concepts. Because the model relies on historical practice trajectories, newly enrolled students lack sufficient interaction records. As a result, initial mastery estimations default to uncalibrated global priors ($P(L_0)$), leading to suboptimal question recommendations and difficulty matching until a critical mass of formative responses is gathered.
+\end{itemize}
+
+\subsection*{Future Improvements}
+
+\begin{itemize}
+    \item \textbf{Multilingual Support \& Indonesian Medical NLP:}
+          Extend the ingestion, knowledge extraction, and MCQ generation pipelines to support Bahasa Indonesia. This includes integrating localized medical terminologies and ontology mappings (such as SNOMED CT Indonesian translations), fine-tuning bilingual extraction prompts, and providing full localization across the iPadOS application interface.
+
+    \item \textbf{Multimodal \& Image-Grounded Question Synthesis:}
+          Incorporate vision-language models (VLMs) alongside document layout parsing to extract, index, and associate high-yield anatomical illustrations and histological slides. This will enable automated generation of visual diagnostic questions, image-label matching tasks, and hot-spot identification flashcards.
+
+    \item \textbf{Expanded Question Typologies \& Granular Difficulty Calibration:}
+          Introduce a wider variety of question structures, including multi-step clinical reasoning vignettes, case-based scenarios, and assertion-reason questions, while retaining the five-option multiple-choice format. Additionally, incorporate cognitive taxonomy classifiers, such as Bloom's Revised Taxonomy, to enable more precise difficulty calibration and stronger alignment with medical board examination standards.
+
+    \item \textbf{Multi-Signal \& Deep Knowledge Tracing Enhancements:}
+          Enhance the mastery inference framework by transitioning from standard single-parameter BKT toward multi-signal or Deep Knowledge Tracing (DKT) architectures. Incorporating continuous behavioral signals---such as response latency, self-assessed confidence scores, circadian study intervals, and knowledge graph prerequisite traversal---will yield significantly more accurate student models.
+
+    \item \textbf{Expanded Multi-Format Document Ingestion:}
+          Broaden the preprocessing and OCR ingestion layer beyond textbook PDFs to handle additional institutional formats, including Microsoft Word (.docx) lecture notes, slide presentations (.pptx), clinical practice guidelines, web articles, and scanned paper-based exam archives with formula and tabular data recovery.
+\end{itemize}

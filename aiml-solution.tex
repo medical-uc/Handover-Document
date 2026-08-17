@@ -3,84 +3,222 @@
 \subsection*{Data Collection \& Preprocessing}
 
 \subsubsection*{Data Sources}
-Medical School Material Slides \\
 
-\vspace{-14pt}
-\begin{tabular}{ll}
-Format and Size & : PDF and PPTX, 10 documents, each 22 to 122 pages/slides \\
-Slide structure & :
-\end{tabular}
-\begin{itemize}[itemsep=0pt,topsep=0pt]
-    \item Title \& subtitle
-    \item Content
-    \item Table
-    \item Flowcharts
-    \item Diagram with labels
-    \item Other images
+\begin{itemize}
+    \item \textbf{Medical Textbooks (\texttt{data/textbook/}):}
+    \begin{itemize}
+        \item \textbf{Source \& Format:} AccessMedicine by McGraw-Hill (PDF, 3 documents, $\sim$700--1000 pages each)
+        \item \textbf{Titles:}
+        \begin{itemize}
+            \item \textit{Ganong's Review of Medical Physiology (27th ed.)}
+            \item \textit{Harper's Illustrated Biochemistry}
+            \item \textit{Junqueira's Basic Histology: Text and Atlas}
+        \end{itemize}
+        \item \textbf{Content Structure:}
+        \begin{itemize}[itemsep=0pt,topsep=0pt]
+            \item Chapter titles, headings, and sub-headings
+            \item Paragraph body text and nested list structures
+            \item Tables with captions and footnotes
+            \item Diagrams and flowcharts
+            \item Inline mathematical equations
+        \end{itemize}
+    \end{itemize}
+
+    \item \textbf{Question Sets (\texttt{data/mcq/}):}
+    \begin{itemize}
+        \item Pre-made MCQ evaluation packets (\textit{Batch 1}, \textit{Batch 2}) for question validation and benchmarking.
+    \end{itemize}
 \end{itemize}
+
 
 \subsubsection*{Data Cleaning}
 
-
+\noindent Raw PDFs are first extracted by \textbf{MinerU} (in an isolated Python
+environment), which produces a structured \texttt{*\_\allowbreak middle.json} block file and associated
+\texttt{*\_\allowbreak content\_\allowbreak list.json} per chapter. The \texttt{post\_process\_book} package then cleans
+this MinerU output to produce the final text corpus.
 
 \begin{itemize}
-    \item{Format Standardization} \\
-    Source materials are provided in both PDF and PPTX formats. To ensure consistent downstream processing, PPTX files are converted into PDF format using the LibreOffice CLI. This provides a uniform input format for the subsequent document processing pipeline.
-    
-    \item{saldkmasd}
-    
+    \item Removing irrelevant content blocks: image blocks, running headers/footers, page numbers,
+          source attribution lines, ``reproduced/adapted with permission'' phrases, publisher
+          citation parentheticals, and entire \textit{Recommended Reading} / \textit{References}
+          sections.
+    \hspace{8pt}
+    \begin{figure}[htbp]
+        \centering
+        $\vcenter{\hbox{\includegraphics[width=0.32\textwidth]{images/noise4.png}}}$
+        \hfill
+        $\vcenter{\hbox{\includegraphics[width=0.32\textwidth]{images/noise5.png}}}$
+        \hfill
+        $\vcenter{\hbox{\includegraphics[width=0.32\textwidth]{images/noise3.png}}}$
+    \end{figure}
+    \item Preserving all paragraph text, list structures, table bodies, inline figure references
+          (e.g.\ \textit{Figure 1-1}), and mathematical equations in their original form.
+    \item Outputs per chapter: \texttt{<basename>\allowbreak.cleaned\allowbreak.md} (full cleaned markdown) and
+          \texttt{<basename>\allowbreak.page\_\allowbreak map.json} (character-level and line-level page offsets used
+          for downstream retrieval grounding).
 \end{itemize}
-
-
-Removing irrelevant data from the slides, such as:
-\begin{itemize}[itemsep=0pt,topsep=0pt]
-    \item header \& footer
-    \item decorative image
-\end{itemize}
-\begin{figure}[htbp]        
-    \centering
-    \includegraphics[width=0.45\textwidth]{images/noise1.png}
-    \hfill
-    \includegraphics[width=0.45\textwidth]{images/noise2.png}
-    % \caption{Two images side by side.}
-    % \label{fig:two-images}
-\end{figure}
 
 
 \subsubsection*{Data Preprocessing}
 
+\noindent After cleaning, the \texttt{.cleaned.md} files pass through two sequential steps
+before knowledge-graph construction.
+
+\begin{itemize}
+    \item \textbf{Document rewriting:}
+          \texttt{rewrite\_medical\_md.py} (\texttt{document-rewriter} repository) reads each
+          \texttt{.cleaned.md} chapter and re-emits it as a structurally tagged markdown file.
+          Body paragraphs are carried over verbatim into \texttt{<con>} elements; PDF-extraction
+          artefacts (non-breaking spaces, soft hyphens, mid-sentence page-break splits) are
+          repaired. Inference is limited to one \textbf{HuatuoGPT-o1-72B} call per chapter for
+          the \texttt{<topic>} element, which has no source counterpart.
+
+    \item \textbf{Stage 1 parse:}
+          The tagged markdown is consumed by Stage~1 of the \texttt{medkg} pipeline
+          (\texttt{stage1\_parse.py}), which produces a tag-free normalised text file and a
+          structured IR JSON carrying offset-anchored chunks, figures and passages. Chunk kinds
+          are \texttt{prose}, \texttt{definition}, \texttt{clinical}, \texttt{summary} and
+          \texttt{caption}; only the first four reach Stage~2 extraction.
+\end{itemize}
+
+
 \subsubsection*{Feature Engineering}
+
+\begin{itemize}
+    \item \textbf{Context enrichment:} The most specific section heading from each chunk's
+          \texttt{section\_path} is prepended to its text before any LLM call, preserving the
+          governing medical concept even for short fragment chunks.
+
+    \item \textbf{Medical triple extraction:}
+          Stage~2 of the \texttt{medkg} pipeline makes one \textbf{HuatuoGPT-o1-72B} LLM
+          call per chunk to extract structured \texttt{\{subject, relation, object\}} triples.
+          {\sloppy Relations are constrained to a closed \textbf{27-relation taxonomy} defined in
+          \texttt{medkg/ontology\_medschool.json}:
+          \texttt{treated\_with}, \texttt{prevented\_by}, \texttt{caused\_by},
+          \texttt{finding\_site}, \texttt{associated\_with}, \texttt{present\_in\_patient},
+          \texttt{part\_of}, \texttt{located\_in}, \texttt{composed\_of}, \texttt{connects\_to},
+          \texttt{secretes}, \texttt{synthesizes}, \texttt{stores}, \texttt{transports},
+          \texttt{converts\_to}, \texttt{catalyzes}, \texttt{regulates}, \texttt{stimulates},
+          \texttt{inhibits}, \texttt{requires}, \texttt{has\_function}, \texttt{risk\_factor\_for},
+          \texttt{complication\_of}, \texttt{diagnosed\_by}, \texttt{adverse\_effect\_of},
+          \texttt{contraindicated\_in}, \texttt{has\_mechanism}.
+          14 deterministic relation guards then audit every extracted relation before assertion.\par}
+
+    \item \textbf{Distractor engineering:} A two-tier strategy selects wrong answer options.
+          Tier 1 performs corpus-level retrieval — for the same \texttt{(topic, relation)} pair,
+          other objects seen elsewhere in the corpus serve as plausible distractors.
+          Tier 2 falls back to the LLM when Tier 1 yields fewer than 3 candidates. A Pydantic
+          \texttt{DistractorSet} validator rejects any distractor that duplicates the correct
+          answer.
+
+    \item \textbf{Domain Knowledge Graph:}
+          \texttt{medkg/} implements an 8-stage pipeline that builds an RDF knowledge
+          graph from the textbook markdown — scispaCy NER, SapBERT/FAISS entity linking to
+          UMLS/SNOMED CT, deterministic post-coordination modifier minting (\texttt{INSTANCE}
+          nodes), and RDFS/OWL-RL reasoning. This enriches the semantic structure of extracted
+          medical entities beyond what the triple-extraction LLM alone can capture.
+\end{itemize}
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection*{Exploratory Data Analysis}
 
-Explain:
 \begin{itemize}
-    \item Key insights
-    \item Visualization methods
-    \item Statistical findings
+    \item \textbf{Question bank distribution:}
+          The generated question bank (\texttt{question\_bank.json}) contains \textbf{188 validated
+          MCQs} spanning medical textbook sections, distributed across three difficulty tiers:
+          Tier 1 (Recall), Tier 2 (Application), and Tier 3 (Clinical Vignette Reasoning).
+
+    \item \textbf{Self-critique correction rate:}
+          Approximately \textbf{62\% (116 of 188)} questions triggered the automated self-critique
+          correction pass (\texttt{valid\_as\_generated: false}), demonstrating that the
+          \textit{Critique} and \textit{Corrector} feedback loop is essential for output quality —
+          single-pass generation alone was insufficient.
+
+    \item \textbf{MinerU quality diagnostics:}
+
+          {\sloppy \texttt{src/evaluation/mineru\_quality.py} provides reference-free quality metrics for
+          raw MinerU output, including garbage-character ratio, empty-block ratio, repeated-character
+          runs, and per-block confidence scores. These were used to spot-check extraction quality
+          across the five textbook PDFs. \par}
+
+    \item \textbf{Knowledge graph structure:}
+          {\sloppy Student interaction data is stored in Neo4j as
+          \texttt{(Student)-[:ANSWERED]->(Question)} edges, with a topic hierarchy modelled as
+          \texttt{(Topic)-[:SUB\_TOPIC\_OF]->(Topic)} to support spaced-repetition scheduling
+          and Bayesian Knowledge Tracing queries.\par}
 \end{itemize}
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection*{Model Experiment}
 
-Document your experiments systematically.
+\noindent All models are used in an \textbf{inference-only} setup — no fine-tuning or
+backpropagation. The list below documents each model's role, configuration, and validation:
 
-For each model, include:
+{\sloppy
 \begin{itemize}
-    \item Model architecture
-    \item Why it was chosen
-    \item Hyperparameters
-    \item Training procedure
-    \item Evaluation metrics
-    \item Results
-\end{itemize}
+    \item \textbf{HuatuoGPT-o1-72B (4-bit)} (\textit{LLM, Reasoning})
+    \begin{itemize}
+        \item \textbf{Role:} Document rewriting (\texttt{rewrite\_medical\_md.py}); Stage~2 relation \& modifier extraction (\texttt{medkg/stage2\_extract.py})
+        \item \textbf{Configuration:} OpenAI-compatible vLLM endpoint; chain-of-thought traces stripped on the client side
+        \item \textbf{Validation:} Tag-completeness check; Pydantic schema validation (\texttt{Triple}, \texttt{Modifier})
+    \end{itemize}
+
+    \item \textbf{SapBERT} (\textit{Sentence Transformer})
+    \begin{itemize}
+        \item \textbf{Role:} Stage~3 entity linking to UMLS/SNOMED CT (\texttt{medkg/stage3\_link.py})
+        \item \textbf{Configuration:} FAISS \texttt{IndexFlatIP}; cosine similarity floor 0.70; optional LLM reranking
+        \item \textbf{Validation:} Link-confidence distribution; CUI collision detection
+    \end{itemize}
+
+    \item \textbf{Qwen3.5-27B} (\textit{LLM})
+    \begin{itemize}
+        \item \textbf{Role:} MCQ question-stem generation, self-critique, and distractor evaluation (\texttt{medkg/mcq.py})
+        \item \textbf{Configuration:} Single correction cycle
+        \item \textbf{Validation:} Pydantic schema validation (\texttt{DistractorSet}, \texttt{Critique}); negative-stem guard; 300-char stem cap
+    \end{itemize}
+\end{itemize}\par}
+
 
 \subsection*{Conclusion}
 
-Summarize:
 \begin{itemize}
-    \item Final model selected
-    \item Why it performs best
-    \item Comparison with other models
-    \item Final performance metrics
+    \item \textbf{Final system architecture:}
+          MinerU PDF extraction $\rightarrow$ \texttt{post\_process\_book} cleaning
+          (\texttt{.cleaned.md} + \texttt{.page\_map.json}) $\rightarrow$
+          \texttt{document-rewriter} (HuatuoGPT-o1-72B tagging) $\rightarrow$
+          \texttt{medkg} Stages 1--8 (parse $\rightarrow$ NER $\rightarrow$ entity linking
+          $\rightarrow$ relation extraction $\rightarrow$ post-coordination $\rightarrow$
+          RDF assertion $\rightarrow$ OWL-RL reasoning $\rightarrow$ N-Quads) $\rightarrow$
+          Qwen3.5-27B MCQ generation pipeline. A decoupled FastAPI serving layer reads
+          from PostgreSQL (\texttt{mcq\_questions} table) and logs student interaction graphs
+          in Neo4j, with \textbf{zero GPU/PyTorch runtime dependencies} in the live API.
+
+    \item \textbf{Why it performs best:}
+    \begin{itemize}
+        \item \textit{Decoupled architecture:} The live API is fully CPU-bound; all heavy
+              inference runs offline during ingestion and generation.
+        \item \textit{High quality control:} Every served question passes strict Pydantic
+              schema validation and the self-critique correction loop before being committed
+              to the database.
+        \item \textit{Graph-based student tracking:} Neo4j enables real-time spaced repetition
+              and Bayesian Knowledge Tracing (BKT) based on per-topic mastery edges.
+    \end{itemize}
+
+    \item \textbf{Comparison with alternative approaches:}
+    \begin{itemize}
+        \item \textit{Single-pass LLM question generation:} Replaced by the 6-step triple
+              extraction $\rightarrow$ distractor generation $\rightarrow$ self-critique pipeline
+              to eliminate answer leakage and reduce hallucination in generated stems.
+    \end{itemize}
+
+    \item \textbf{Final performance metrics:}
+    \begin{itemize}
+        \item Total validated MCQs in bank: \textbf{188 questions}
+        \item Ingestion throughput: \texttt{post\_process\_book} cleaner runs in sub-second
+              time per PDF chapter
+        \item API serving latency: instant query response via indexed PostgreSQL and Neo4j
+              graph queries
+    \end{itemize}
 \end{itemize}

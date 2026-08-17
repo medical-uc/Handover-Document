@@ -1,0 +1,21 @@
+graph LR
+    subgraph OfflinePipeline["Offline AI/ML Pipeline"]
+        PDF["Medical Textbooks (PDF)"] --> MinerU["MinerU OCR & Layout"]
+        MinerU --> PostProcess["8-Stage Rule Cleanup"]
+        PostProcess --> VLM["Qwen2.5-VL Captioning"]
+        VLM --> SemanticChunk["Semantic Chunking"]
+        SemanticChunk --> MCQGen["6-Step LLM MCQ Gen (Qwen3.5/Huatuo)"]
+        MCQGen --> DB[(PostgreSQL Bank)]
+    end
+
+    subgraph LiveServing["Zero-Inference Live Serving"]
+        DB --> API["FastAPI Backend"]
+        API <--> Neo4j[(Neo4j Student Graph)]
+        API <--> iPad["iPadOS Client (SwiftUI)"]
+    end
+
+    subgraph Personalization["Hybrid BKT Personalization"]
+        Neo4j -. "Pooled Attempts" .-> BKTFit["Server Baum-Welch EM"]
+        BKTFit -. "Global Params" .-> iPad
+        iPad -- "On-Device BKT p_know" --> Neo4j
+    end

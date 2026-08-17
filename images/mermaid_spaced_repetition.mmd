@@ -1,0 +1,14 @@
+graph TD
+    subgraph QuizTrack["Quiz Spaced Repetition - Student REVIEWING Question edge"]
+        QAnswer{"Quiz Answer Outcome"}
+        QAnswer -->|Correct AND Confident| QPass["Strong Pass:\nstreak += 1\ninterval = min(60, interval x 2)"]
+        QAnswer -->|Wrong OR Unsure/Guessing| QReset["Reset Schedule:\nstreak = 0\ninterval = 1 Day"]
+    end
+
+    subgraph FlashcardTrack["Flashcard Spaced Repetition - Flashcard Node"]
+        FRating{"Flashcard Self-Rating"}
+        FRating -->|Again| FAgain["streak = 0, interval = 1 Day"]
+        FRating -->|Hard| FHard["streak unchanged, interval = min(60, interval x 1.2)"]
+        FRating -->|Good| FGood["streak += 1, interval = min(60, interval x 2.0)"]
+        FRating -->|Easy| FEasy["streak += 1, interval = min(60, interval x 2.5)"]
+    end

@@ -1,5 +1,7 @@
 \documentclass[11pt,a4paper]{article}
 
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
 \usepackage[a4paper,margin=1in]{geometry}
 \usepackage{array}
 \usepackage{longtable}
@@ -8,11 +10,19 @@
 \usepackage{hyperref}
 \usepackage{titling}
 \usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{microtype}
+\usepackage{float}
+\usepackage{pmboxdraw}
 
-\setlength{\droptitle}{-4em}    % Move title upward
 \setlength{\parskip}{0.5em}
 \setlength{\parindent}{0pt}
-\posttitle{\par\vspace{-3em}}   % Reduce space after title
+
+\setlength{\droptitle}{-4em}    % Move title upward
+\posttitle{\end{center}\vspace{-7em}} 
+
+
 
 \titleformat{name=\section,numberless}
     {\huge\bfseries\centering}
@@ -24,8 +34,9 @@
     {\normalfont\large\bfseries}
     {}{0em}{}
 
-
-\title{\fontsize{36pt}{42pt}\selectfont\bfseries{Project Handover Document}}
+\title{
+    \fontsize{36pt}{42pt}\selectfont\bfseries Project Handover Document
+}
 \date{}
 
 \begin{document}
@@ -51,7 +62,7 @@
 \subsection*{Stakeholders}
 
 \begin{itemize}[leftmargin=*]
-    \item dr. Florence Pribadi, M.Si.
+    \item dr. Florence Pribadi, M.Sit.
     \item dr. Maria Jessica Rachman, M.Si.
 \end{itemize}
 
@@ -99,5 +110,9 @@ Access Ownership & Link to artifact location \\
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \newpage
 \input{aiml-system}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\input{limitations-and-future-improvements}
 
 \end{document}

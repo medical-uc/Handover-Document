@@ -1,0 +1,29 @@
+sequenceDiagram
+    autonumber
+    participant Client as iPadOS Client
+    participant MW as SessionAuthMiddleware
+    participant Neo4j as Neo4j Graph DB
+    participant Router as FastAPI Router Handler
+
+    Note over Client,Router: Registration / Login Flow
+    Client->>Router: POST /students/login {student_number}
+    Router->>Neo4j: Query Student & MATCH student_number
+    Router->>Router: Generate token = secrets.token_urlsafe(32)
+    Router->>Router: Compute token_hash = SHA256(token)
+    Router->>Neo4j: CREATE Session {token_hash, expires_at: now + 30d}
+    Router-->>Client: 200 OK {token, expires_at}
+    Client->>Client: Store token securely in KeychainStore
+
+    Note over Client,Router: Authenticated API Invocation
+    Client->>MW: GET /students/me/profile Header: Authorization Bearer token
+    MW->>MW: Check URL vs Allowlist Regex
+    MW->>MW: Extract raw token & compute SHA256
+    MW->>Neo4j: MATCH Student HAS_SESSION Session {token_hash} WHERE not revoked AND not expired
+    alt Session Valid
+        Neo4j-->>MW: Return student_id
+        MW->>MW: request.state.student_id = student_id
+        MW->>Router: Forward request to route handler
+        Router-->>Client: 200 OK {profile data}
+    else Session Expired / Revoked / Invalid
+        MW-->>Client: 401 Unauthorized
+    end

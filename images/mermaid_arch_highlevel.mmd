@@ -1,0 +1,67 @@
+flowchart TB
+    subgraph ClientTier["Client Tier (iPadOS SwiftUI)"]
+        direction TB
+        UI["SwiftUI Views (Dashboard, Quiz, Flashcards, Mastery, Subjects)"]
+        VM["ObservableObject ViewModels (@MainActor)"]
+        BKT["On-Device BKTStore (UserDefaults)"]
+        Keychain["KeychainStore (Secure Session Token)"]
+        APIClient["APIClient / APIClientProtocol"]
+
+        UI <--> VM
+        VM <--> BKT
+        VM <--> Keychain
+        VM <--> APIClient
+    end
+
+    subgraph NetworkTier["HTTP Network Boundary"]
+        BearerAuth["Authorization: Bearer Token"]
+        JSONAPI["JSON REST API (Port 8000)"]
+    end
+
+    subgraph BackendTier["Serving Backend Tier (FastAPI / Python 3.13+)"]
+        direction TB
+        MainApp["app.main:app (FastAPI)"]
+        Limiter["SlowAPI Rate Limiter"]
+        AuthMid["SessionAuthMiddleware (Regex Allowlist)"]
+        ErrHandler["Centralized Error Envelope Handler"]
+        R_Students["app.routers.students (Auth, Profile, Streak, Energy, Nudge)"]
+        R_Quiz["app.routers.quiz (Topics, Questions, Sessions, History, Mastery, Due)"]
+        R_Flashcards["app.routers.flashcards (Cards, Reviews, Sessions, Due)"]
+
+        MainApp --> Limiter
+        MainApp --> AuthMid
+        MainApp --> ErrHandler
+        MainApp --> R_Students
+        MainApp --> R_Quiz
+        MainApp --> R_Flashcards
+    end
+
+    subgraph ServiceTier["Backend Domain Services (src/)"]
+        direction TB
+        S_Enroll["src.student_kg.enrollment"]
+        S_Session["src.student_kg.session"]
+        S_Streak["src.student_kg.streak"]
+        S_Energy["src.student_kg.energy"]
+        S_Bank["src.quiz.bank (Postgres Question Loader)"]
+        S_Attempts["src.quiz.attempts (Event Sourcing & Quiz Spaced Repetition)"]
+        S_QSessions["src.quiz.sessions"]
+        S_Mastery["src.quiz.mastery (Persists Client p_know)"]
+        S_BKTFit["src.quiz.bkt_fit (Baum-Welch EM Engine)"]
+        S_Cards["src.flashcards.cards"]
+        S_Reviews["src.flashcards.reviews (SuperMemo Spaced Repetition)"]
+        S_FSessions["src.flashcards.sessions"]
+    end
+
+    subgraph StorageTier["Persistence Infrastructure"]
+        PG[(PostgreSQL Database\nTable: mcq_questions)]
+        Neo4j[(Neo4j Graph Database\nStudent Event Chain & Mastery)]
+    end
+
+    APIClient <==> BearerAuth <==> JSONAPI <==> MainApp
+
+    R_Students --> S_Enroll & S_Session & S_Streak & S_Energy
+    R_Quiz --> S_Bank & S_Attempts & S_QSessions & S_Mastery & S_BKTFit
+    R_Flashcards --> S_Cards & S_Reviews & S_FSessions
+
+    S_Bank <--> PG
+    S_Enroll & S_Session & S_Streak & S_Energy & S_Attempts & S_QSessions & S_Mastery & S_BKTFit & S_Reviews & S_FSessions <--> Neo4j

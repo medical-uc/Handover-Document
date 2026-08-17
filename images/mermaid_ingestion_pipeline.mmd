@@ -1,0 +1,40 @@
+flowchart TD
+    subgraph Stage1["1. Parsing & Normalization"]
+        PDF["Textbook PDF (data/textbook/)"] --> MinerU["MinerU CLI (Isolated .venv-mineru)"]
+        MinerU --> MiddleJSON["_middle.json (Layout Blocks & BBoxes)"]
+        MinerU --> VisualCrops["images/*.jpg (Figure Crops)"]
+    end
+
+    subgraph Stage2["2. Post-Processing Engine (src/post_process)"]
+        MiddleJSON --> S1["1. parse_json (Validate schema)"]
+        S1 --> S2["2. flatten_layout (Drop image blocks)"]
+        S2 --> S3["3. extract_features (Typography, Indentation, Geometrics)"]
+        S3 --> S4["4. remove_headers_footers (Repetition Detection)"]
+        S4 --> S5["5. classify_blocks (Rule-based: Title, Section, Paragraph, Table)"]
+        S5 --> S6["6. reconstruct_reading_order (Continuation merging)"]
+        S6 --> S7["7. build_semantic_tree (Doc > Section > Paragraph Hierarchy)"]
+        S7 --> S8["8. render_json -> _post_processed.json"]
+    end
+
+    subgraph Stage3["3. Multimodal Captioning & Semantic Chunking"]
+        VisualCrops --> QwenVL["Qwen2.5-VL-7B-Instruct (src/captioning/qwen_vl.py)"]
+        QwenVL --> Captions["Figure Captions & Descriptions"]
+        S8 & Captions --> Unify["unify.py (Join Text AST + Visual Captions)"]
+        Unify --> Chunker["SemanticChunker (all-MiniLM-L6-v2 Embeddings)"]
+        Chunker --> Chunks["_v1_chunks.json (Context-Enriched Chunks)"]
+    end
+
+    subgraph Stage4["4. 6-Step LLM MCQ Generation (mcq_generation.ipynb)"]
+        Chunks --> Step1["Step 1: Chunk Filtering & Context Heading Prepending"]
+        Step1 --> Step2["Step 2: Medical Triple Extraction (Qwen3.5-27B / HuatuoGPT, 27 Relations)"]
+        Step2 --> Step3["Step 3: Two-Tier Distractor Generation (Corpus Retrieval + LLM Fallback)"]
+        Step3 --> Step4["Step 4: Question Stem Generation (Recall, Application, Clinical Vignette)"]
+        Step4 --> Step5["Step 5: Self-Critique & 1-Cycle Minimal Edit Correction"]
+        Step5 --> Step6["Step 6: Option Shuffling & Serialization"]
+        Step6 --> QBank[("question_bank.json")]
+    end
+
+    subgraph Stage5["5. Database Population"]
+        QBank --> PopScript["scripts/populate_mcq_postgres.py"]
+        PopScript --> PGDB[("PostgreSQL: mcq_questions")]
+    end

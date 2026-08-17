@@ -1,24 +1,764 @@
+%% ============================================================
+%%  AI/ML System Technical Overview
+%%  MediQuiz: Intelligent Tutoring System for Medical Students
+%%  Author: Darrell Cornelius Rivaldo & Team
+%%  Date: August 2026
+%% ============================================================
+
 \section*{AI/ML System Technical Overview}
 
+% ────────────────────────────────────────────────────────────
 \subsection*{System Architecture}
 
-Explain the overall architecture of the application.
+\subsubsection*{Architectural Philosophy: The ``Two Halves'' Principle}
 
+The system is strictly partitioned into two decoupled halves that interact exclusively through
+persisted storage contracts:
+
+\begin{itemize}
+    \item \textbf{The Offline Content \& Knowledge Pipeline (Heavy AI/ML):}
+    \begin{itemize}
+        \item Ingests raw textbook PDFs and slides.
+        \item Executes multimodal OCR, vision-language diagram parsing, rule-based AST
+              transformations, scispaCy/SapBERT medical entity linking, and multi-step LLM
+              question generation with self-critique.
+        \item Requires CUDA/MPS GPU hardware, PyTorch, Transformers, FAISS, and isolated
+              Python runtimes.
+        \item Produces clean, validated relational tables in PostgreSQL (\texttt{mcq\_questions})
+              and semantic graphs in Neo4j / RDF (\texttt{graph.nq}).
+    \end{itemize}
+
+    \item \textbf{The Live Serving Layer (FastAPI + iPadOS):}
+    \begin{itemize}
+        \item High-throughput, CPU-bound REST API built on FastAPI and Uvicorn.
+        \item \textbf{Zero PyTorch or Transformers runtime dependencies} --- the serving layer
+              never loads model weights, eliminating GPU hosting costs, cold-start latency, and
+              out-of-memory crashes on web workers.
+        \item Backed by PostgreSQL for immutable question content and Neo4j for event-sourced
+              student interaction history, spaced repetition scheduling, and topic mastery.
+        \item Real-time personalization executes directly on the student's iPad using an
+              on-device Bayesian Knowledge Tracing (BKT) engine.
+    \end{itemize}
+\end{itemize}
+
+\subsubsection*{High-Level System Diagram}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{images/mermaid_arch_highlevel.pdf}
+    \caption{Full component decomposition: Client Tier, HTTP Network Boundary, Backend Tier,
+             Domain Service Tier, and Persistence Infrastructure.}
+\end{figure}
+
+\subsubsection*{Service Layer \& Component Decomposition}
+
+\textbf{Backend Architecture} (\texttt{intelligent-tutoring-system-for-medical-student}):
+
+\begin{itemize}
+    \item \textbf{\texttt{app.main}:} Application entry point; installs middleware stack, CORS,
+          SlowAPI rate limiting, and exception handlers.
+    \item \textbf{\texttt{app.auth\_middleware}:} Inspects every request against a strict regex
+          path allowlist; resolves opaque Bearer tokens to \texttt{student\_id} via Neo4j.
+    \item \textbf{\texttt{app.errors}:} Formats all HTTP, validation, and driver exceptions into
+          a unified contract: \verb|{"error": {"code": "...", "message": "...", "details": [...]}}|.
+    \item \textbf{\texttt{src.student\_kg}:} Graph driver and node primitives for student records,
+          streak calculations, gamified energy balances, and auth sessions.
+    \item \textbf{\texttt{src.quiz}:} Database bank queries, session tracking, answer recording,
+          spaced-repetition schedules, and Baum-Welch EM parameter fitting.
+    \item \textbf{\texttt{src.flashcards}:} Flashcard generation from questions, 4-tier rating
+          logging, and due-review queues.
+    \item \textbf{\texttt{src.post\_process}:} 8-stage deterministic cleanup pipeline for MinerU
+          PDF parser outputs.
+    \item \textbf{\texttt{src.captioning}:} Vision-language captioning using Qwen2.5-VL-7B.
+    \item \textbf{\texttt{src.domain\_kg}:} 8-stage biomedical knowledge graph extraction and
+          reasoning pipeline (medkg).
+\end{itemize}
+
+\textbf{Frontend Architecture} (\texttt{personalized-learning-ios}):
+
+\begin{itemize}
+    \item \textbf{Pattern:} MVVM (Model-View-ViewModel) + Protocol-driven Networking.
+    \item \textbf{\texttt{App} Layer:} Application lifecycle, root state routing
+          (\texttt{ContentView}), and navigation container (\texttt{RootView}).
+    \item \textbf{\texttt{Core} Layer:}
+    \begin{itemize}
+        \item \textit{Networking:} \texttt{APIClient} implementing \texttt{APIClientProtocol},
+              \texttt{APIConfig}, \texttt{APIError}, and custom ISO8601 date decoding.
+        \item \textit{Persistence:} \texttt{KeychainStore} (secure credential store),
+              \texttt{SessionManager} (session token façade), and \texttt{BKTStore}
+              (on-device Bayesian Knowledge Tracing engine).
+        \item \textit{UI:} Global typography, palette tokens (\texttt{Theme}),
+              \texttt{SidebarView}, and \texttt{TopBarView}.
+    \end{itemize}
+    \item \textbf{\texttt{Features} Layer:} Encapsulated feature domains --- \textit{Auth},
+          \textit{Dashboard}, \textit{Quiz}, \textit{Flashcard}, \textit{Subjects},
+          \textit{History}, \textit{Bookmark}, \textit{Settings} --- each containing dedicated
+          Views, ViewModels, API extensions, and Models.
+\end{itemize}
+
+\subsubsection*{Storage \& Graph Topology}
+
+The persistence model leverages PostgreSQL for relational data and Neo4j for event-sourced
+graph data.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{images/mermaid_graph_schema.pdf}
+    \caption{Neo4j Student Knowledge Graph Schema: nodes, relationships, and property contracts.}
+\end{figure}
+
+Key graph design rules:
+
+\begin{enumerate}
+    \item \textbf{Event Sourcing:} Every student interaction creates an immutable
+          \texttt{InteractionEvent} node linked in chronological order via \texttt{:NEXT} edges
+          and grouped under \texttt{:QuizSession} / \texttt{:FlashcardSession} via
+          \texttt{:HAS\_ANSWER}.
+    \item \textbf{Mutable Schedules as Edges:} Spaced repetition schedules are stored directly
+          on the \texttt{(Student)-[:REVIEWING]->(Question)} edge (quiz) and the
+          \texttt{Flashcard} node (flashcards), updating deterministically upon each submission.
+    \item \textbf{Mastery Persistence:} The \texttt{:MASTERS} edge represents the student's
+          on-device BKT estimate ($p_{\text{know}}$), synchronised asynchronously via
+          \texttt{PUT /quiz/mastery}.
+    \item \textbf{Relational Question Isolation:} The \texttt{Question} node in Neo4j contains
+          \textbf{only} \texttt{uid}. Stem text, options, explanations, and diagrams reside in
+          PostgreSQL to protect graph traversal performance.
+\end{enumerate}
+
+\subsubsection*{Security, Authentication \& Session Model}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.92\linewidth]{images/mermaid_auth_flow.pdf}
+    \caption{Opaque Bearer Token authentication sequence: registration/login flow and
+             authenticated API invocation with \texttt{SessionAuthMiddleware}.}
+\end{figure}
+
+\textbf{Why Opaque Bearer Tokens (Not JWT)?}
+
+JWTs cannot be instantly revoked without a distributed blacklist. Storing a SHA-256 hashed
+token in Neo4j allows instantaneous server-side revocation on logout
+(\texttt{revoked\_at = datetime()}) while keeping raw tokens out of the database.
+
+% ────────────────────────────────────────────────────────────
+\subsection*{End-to-End Application Flows}
+
+\subsubsection*{Flow 1: Complete System End-to-End Dataflow}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{images/mermaid_e2e_flow.pdf}
+    \caption{Complete system dataflow across the three subsystems: Offline Content Ingestion,
+             BKT Parameter Training, and Live Student Learning Interaction.}
+\end{figure}
+
+\subsubsection*{Flow 2: Student Authentication \& Session Lifecycle}
+
+The iPadOS client authenticates via a \texttt{POST /students/login} or
+\texttt{POST /students/register} call. The backend generates a cryptographic token
+(\texttt{secrets.token\_urlsafe(32)}), computes its SHA-256 hash, and stores a
+\texttt{:Session} node in Neo4j. The raw token is returned to the client and stored
+securely in \texttt{KeychainStore} (Apple Security framework). All subsequent requests
+carry this token as a Bearer header, resolved by \texttt{SessionAuthMiddleware}.
+
+\subsubsection*{Flow 3: Quiz Execution, Grading \& Mastery Sync}
+
+The quiz flow involves four sequential phases:
+
+\begin{enumerate}
+    \item \textbf{Option Selection \& Instant Grading:} The student selects an answer option and
+          confidence level. \texttt{POST /quiz/questions/\{uid\}/check} is a public (no-auth)
+          stateless call that evaluates the answer against an in-memory sanitised question bank
+          --- returning \texttt{correct}, \texttt{correct\_index}, and \texttt{explanation}
+          within sub-15\,ms.
+    \item \textbf{On-Device BKT Update:} \texttt{BKTStore.record()} updates $p_{\text{know}}$
+          for the relevant topic using Bayesian posterior equations, then fires a background
+          \texttt{PUT /quiz/mastery} to sync the estimate to Neo4j.
+    \item \textbf{Stateful Log Commit:} \texttt{POST /quiz/questions/\{uid\}/log} (Bearer
+          authenticated) persists the \texttt{QUIZ\_ANSWER} event and updates the
+          \texttt{(Student)-[:REVIEWING]->(Question)} spaced-repetition schedule.
+    \item \textbf{Quiz Completion \& Gamification:} \texttt{POST /quiz/sessions/\{id\}/end}
+          marks the session complete, awards $+5$ Energy, and records the activity date for
+          streak calculation.
+\end{enumerate}
+
+\subsubsection*{Flow 4: Flashcard Spaced Repetition Lifecycle}
+
+Flashcard sessions prioritise \textit{due} cards first (where
+\texttt{next\_review\_at} $\leq$ now), then fill remaining slots with the weakest topics
+(lowest BKT $p_{\text{know}}$). The student reveals the card back via
+\texttt{POST /flashcards/cards/\{uid\}/reveal}, then rates recall quality
+(\textit{Again / Hard / Good / Easy}). Each rating triggers a SuperMemo-style interval
+update on the \texttt{Flashcard} node and awards $+1$ Energy.
+
+\subsubsection*{Flow 5: Adaptive Knowledge Tracing \& Personalization Loop}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth,height=0.85\textheight,keepaspectratio]{images/mermaid_bkt_personalization.pdf}
+    \caption{Hybrid BKT personalization loop: server-side Baum-Welch EM parameter fitting
+             and client-side real-time knowledge tracing on iPadOS.}
+\end{figure}
+
+\subsubsection*{Flow 6: Offline Multimodal Ingestion \& MCQ Generation Pipeline}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth,height=0.85\textheight,keepaspectratio]{images/mermaid_ingestion_pipeline.pdf}
+    \caption{5-stage offline ingestion pipeline: PDF parsing, 8-stage post-processing,
+             multimodal captioning, 6-step LLM MCQ generation, and PostgreSQL population.}
+\end{figure}
+
+\subsubsection*{Flow 7: Domain Knowledge Graph (medkg) Pipeline}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{images/mermaid_domain_kg.pdf}
+    \caption{8-stage medkg pipeline: Parse $\rightarrow$ NER $\rightarrow$ Entity Linking
+             $\rightarrow$ Post-coordination $\rightarrow$ RDF Assertion $\rightarrow$
+             OWL-RL Reasoning $\rightarrow$ Serve (N-Quads / SPARQL / Neo4j n10s).}
+\end{figure}
+
+% ────────────────────────────────────────────────────────────
 \subsection*{Model Deployment Method}
 
-Describe:
+\subsubsection*{Model Zoo \& Task Allocation Matrix}
+
+\begingroup
+\setlength{\tabcolsep}{4pt}
+\begin{longtable}{|>{\raggedright\arraybackslash}p{0.22\linewidth}|>{\raggedright\arraybackslash}p{0.18\linewidth}|>{\raggedright\arraybackslash}p{0.28\linewidth}|>{\raggedright\arraybackslash}p{0.20\linewidth}|}
+\hline
+\textbf{Model} & \textbf{Type} & \textbf{Task \& Responsibility} & \textbf{Runtime / Env} \\
+\hline
+\endhead
+\textbf{HuatuoGPT-\allowbreak o1-72B (4-bit)} & Medical LLM (Reasoning) &
+Document tagging \& 27-relation biomedical triple extraction & vLLM OpenAI-compatible endpoint \\
+\hline
+\textbf{Qwen3.5-27B} & General / Medical LLM &
+Triple extraction, distractor synthesis, stem generation, self-critique & vLLM / Local HuggingFace \\
+\hline
+\textbf{Qwen2.5-VL-\allowbreak 7B-Instruct} & Vision-Language Model &
+Medical figure captioning \& diagram transcription & PyTorch / Accelerate (MPS / CUDA) \\
+\hline
+\textbf{SapBERT} (\texttt{cambridgeltl}) & Biomedical Sentence Transformer &
+Entity linking to UMLS/SNOMED CT concepts via FAISS ($\cos \geq 0.70$) & FAISS \texttt{IndexFlatIP} (CPU) \\
+\hline
+\textbf{all-MiniLM-\allowbreak L6-v2} & Sentence Transformer &
+Semantic boundary chunking of unified textbook text & \texttt{sentence-\allowbreak transformers} (CPU / MPS) \\
+\hline
+\textbf{MedGemma 4B + UNet} & Multimodal VLM + CNN &
+Diagram classifier \& leader line endpoint detector & \texttt{mlx-\allowbreak community} / PyTorch \\
+\hline
+\textbf{Baum-Welch EM Engine} & 2-State HMM &
+Global parameter fitting for Knowledge Tracing & NumPy / SciPy (Pure CPU) \\
+\hline
+\textbf{On-Device BKT Engine} & 2-State HMM Forward Updater &
+Real-time student mastery calculation ($p_{\text{know}}$) on iPadOS & Swift Standard Library (Zero Network) \\
+\hline
+\end{longtable}
+\endgroup
+
+\subsubsection*{Deployment Topologies \& Inference Infrastructure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{images/mermaid_deployment_topology.pdf}
+    \caption{Deployment topology: Offline Ingestion infrastructure (local Mac / remote GPU cluster)
+             and Production Live Serving infrastructure (FastAPI + PostgreSQL + Neo4j).}
+\end{figure}
+
+\subsubsection*{Zero-Inference Live Serving Architecture}
+
+A critical architectural achievement is that \textbf{the live FastAPI serving application
+performs zero model inference at runtime}:
+
+\begin{enumerate}
+    \item \textbf{CPU-Only Bound:} The production server requires only standard CPU instances
+          (e.g.\ 2 vCPUs, 4\,GB RAM) with negligible footprint.
+    \item \textbf{Instant Latency:} Response times for \texttt{/quiz/questions},
+          \texttt{/quiz/check}, and \texttt{/quiz/log} remain sub-15\,ms because they execute
+          indexed PostgreSQL queries and atomic Cypher graph transactions without model queue
+          delays.
+    \item \textbf{High Reliability:} Server stability is completely decoupled from GPU drivers,
+          CUDA version mismatches, or VRAM exhaustion.
+\end{enumerate}
+
+\subsubsection*{Multi-Environment Isolation Strategy}
+
+Because several specialised medical AI libraries carry incompatible Python and C-extension
+dependencies, the project isolates runtimes into three dedicated virtual environments:
+
 \begin{itemize}
-    \item Deployment strategy
-    \item Infrastructure
-    \item Why this deployment method was chosen
-    \item Deployment workflow
+    \item \textbf{\texttt{.venv/}} --- Main Environment: Python $\geq$ 3.13 (managed by
+          \texttt{uv}). Dependencies: FastAPI, Uvicorn, Neo4j, SQLAlchemy, PyTorch,
+          Transformers, Accelerate, Pydantic, SlowAPI.
+    \item \textbf{\texttt{.venv-mineru/}} --- Isolated Environment: Python 3.10/3.11.
+          Dependencies: \texttt{mineru}, \texttt{magic-pdf}, Detectron2, PaddlePaddle.
+          Invoked exclusively as a subprocess from \texttt{scripts/\allowbreak ingest\_\allowbreak data.py}.
+    \item \textbf{Domain KG env} --- Isolated Environment: Python 3.9--3.11.
+          Dependencies: scispaCy, spacy\,$<$\,3.8, faiss-cpu, rdflib, owlrl.
+          Required for Stage 2 NER and Stage 3 UMLS linking.
 \end{itemize}
 
+\subsubsection*{Hardware Optimisation \& Native Runtime Guards}
+
+\begin{itemize}
+    \item \textbf{Dynamic Device Selection with MPS Bug Workarounds}\\
+          (\texttt{src/\allowbreak captioning/\allowbreak qwen\_vl.py}):
+          {\sloppy Dynamically allocates execution targets (CUDA $\to$ MPS $\to$ CPU) and implements
+          explicit memory purging (\texttt{torch.mps.\allowbreak empty\_cache()},\allowbreak\ \texttt{gc.\allowbreak collect()})
+          upon completion to operate smoothly within Apple Silicon Unified Memory constraints.\par}
+
+    \item \textbf{Native macOS Segfault Protection (\texttt{src/\allowbreak domain\_kg/\allowbreak native\_env.py}):}
+          Addresses an issue on macOS where PyTorch, Thinc/Blis (spaCy), and FAISS clash when
+          initialising separate OpenMP thread pools, resulting in \texttt{Segmentation fault: 11}.
+          Setting \texttt{MEDKG\_NATIVE\_THREADS=1} and \texttt{KMP\_DUPLICATE\_LIB\_OK=TRUE}
+          at the top of the package before any C-extensions load prevents segmentation crashes.
+\end{itemize}
+
+% ────────────────────────────────────────────────────────────
 \subsection*{Source Code Structure}
 
-Explain the repository organization so future developers can:
+\subsubsection*{Backend Codebase Organization (\texttt{fastapi-backend})}
+
+{\small
+\begin{verbatim}
+intelligent-tutoring-system-for-medical-student/
+├── app/                       # FastAPI HTTP Layer & Routers
+│   ├── main.py                # Entry point, middleware, CORS, routers
+│   ├── auth_middleware.py     # SessionAuthMiddleware: Allowlist & token resolver
+│   ├── dependencies.py        # Neo4j driver injection & get_current_student_id
+│   ├── errors.py              # Unified error envelope & global exception handlers
+│   ├── limiter.py             # SlowAPI rate limiter configuration
+│   ├── openapi.py             # OpenAPI schema generator & error response docs
+│   ├── schemas.py             # Pydantic DTO request/response contracts
+│   └── routers/
+│       ├── students.py        # Auth, profile, streak, energy, nudge endpoints
+│       ├── quiz.py            # Topics, questions, check/log, sessions, mastery
+│       └── flashcards.py      # Cards, reviews, sessions, due-review queue
+│
+├── src/                       # Core Business Logic & Domain Services
+│   ├── student_kg/            # Neo4j Student Knowledge Graph Drivers
+│   │   ├── driver.py          # Neo4j singleton driver & constraint initialization
+│   │   ├── enrollment.py      # Student creation & ENROLLMENT genesis event
+│   │   ├── session.py         # Auth session creation, validation & revocation
+│   │   ├── streak.py          # UTC daily streak calculation & energy restore
+│   │   └── energy.py          # Gamification currency ledger
+│   ├── quiz/                  # Quiz Subsystem
+│   │   ├── bank.py            # PostgreSQL question bank loader & sanitizer
+│   │   ├── attempts.py        # Event-sourced QUIZ_ANSWER & spaced repetition
+│   │   ├── sessions.py        # QuizSession start, end, cancel & history
+│   │   ├── mastery.py         # Student-Topic :MASTERS persistence layer
+│   │   └── bkt_fit.py         # Baum-Welch EM Knowledge Tracing fitter
+│   ├── flashcards/            # Flashcard Subsystem
+│   │   ├── cards.py           # Bank-derived flashcard projection
+│   │   ├── reviews.py         # 4-tier review logger & SuperMemo scheduler
+│   │   └── sessions.py        # FlashcardSession lifecycle manager
+│   ├── post_process/          # 8-Stage Deterministic MinerU Cleanup Pipeline
+│   │   ├── pipeline.py        # 8-stage coordinator
+│   │   └── [stages 1-8 modules]
+│   ├── captioning/
+│   │   └── qwen_vl.py         # Qwen2.5-VL-7B vision-language captioner
+│   ├── ingestion/
+│   │   ├── unify.py           # Merge text AST + visual captions
+│   │   └── semantic_chunk.py  # Semantic boundary chunker (MiniLM)
+│   └── domain_kg/             # 8-Stage Biomedical KG Pipeline (medkg)
+│       ├── native_env.py      # macOS OpenMP segfault workaround
+│       ├── ontology.py        # 27-relation biomedical ontology loader
+│       ├── guards.py          # 14 deterministic relation consistency guards
+│       └── stages/            # Stages 1-8 (Parse -> NER -> Link -> Serve)
+│
+├── scripts/                   # CLI Ingestion & Seeding Scripts
+│   ├── ingest_data.py         # Production CLI: PDF -> Chunks pipeline runner
+│   ├── populate_mcq_postgres.py  # Loads question JSON into PostgreSQL
+│   └── generate_dummy_interactions.py  # Synthetic student interaction seeder
+│
+├── notebooks/                 # Exploratory & Generation Notebooks
+│   ├── mcq_generation.ipynb   # 6-step LLM question generation & self-critique
+│   ├── knowledge_tracing.ipynb  # BKT validation & Baum-Welch EM research
+│   └── mcq_output/question_bank.json  # Canonical question bank (188 MCQs)
+│
+├── docker-compose.yml         # Local infrastructure (Postgres, Neo4j, MinIO)
+└── pyproject.toml & uv.lock   # UV project definition & pinned lockfile
+\end{verbatim}
+}
+
+\subsubsection*{Frontend Codebase Organization (\texttt{ipados-swiftui})}
+
+{\small
+\begin{verbatim}
+personalized-learning-ios/personalized-medical-learning-ios/
+├── App/                       # App Lifecycle & Root Navigation
+│   ├── ...App.swift           # @main entry point
+│   ├── ContentView.swift      # Auth routing: RootView or LoginView
+│   └── RootView.swift         # Sidebar navigation container & active view switch
+│
+├── Core/                      # Shared Infrastructure & Foundations
+│   ├── Networking/
+│   │   ├── APIConfig.swift    # Base URL configuration
+│   │   ├── APIClientProtocol.swift  # Complete async protocol abstraction
+│   │   └── APIClient.swift    # URLSession singleton + Bearer auth
+│   ├── Persistence/
+│   │   ├── KeychainStore.swift  # Security framework wrapper
+│   │   ├── SessionManager.swift # Session token & expiry facade
+│   │   └── BKTStore.swift     # On-device Bayesian Knowledge Tracing engine
+│   └── UI/
+│       ├── SidebarView.swift  # iPad landscape sidebar navigation
+│       └── TopBarView.swift   # Header with energy & student indicators
+│
+└── Features/                  # Domain Feature Modules (MVVM)
+    ├── Auth/                  # LoginView, RegisterView, ViewModels
+    ├── Dashboard/             # DashboardView, Streak/Nudge ViewModels
+    ├── Quiz/                  # QuizView, QuizSetupView, QuizViewModel, ...
+    ├── Flashcard/             # FlashcardView, FlashcardSetupView, ...
+    ├── Mastery/               # MasteryAPI, BKT parameter sync
+    ├── Subjects/              # SubjectsView, SubjectDetailView
+    ├── History/               # HistoryView, HistoryViewModel
+    ├── Bookmark/              # BookmarkView
+    └── Settings/              # SettingsView (backend endpoint, logout)
+\end{verbatim}
+}
+
+\subsubsection*{Cross-Repository API \& Protocol Contract Mapping}
+
+\begingroup
+\setlength{\tabcolsep}{4pt}
+\small
+\begin{longtable}{|>{\ttfamily\raggedright\arraybackslash}p{0.36\linewidth}|>{\centering\arraybackslash}p{0.09\linewidth}|>{\centering\arraybackslash}p{0.09\linewidth}|>{\raggedright\arraybackslash}p{0.34\linewidth}|}
+\hline
+\normalfont\textbf{HTTP Route} & \normalfont\textbf{Method} & \normalfont\textbf{Auth} & \normalfont\textbf{Primary Database Action} \\
+\hline
+\endhead
+/students/\allowbreak register & POST & None & Creates \texttt{Student} \& genesis \texttt{ENROLLMENT} in Neo4j \\
+\hline
+/students/\allowbreak login & POST & None & Creates \texttt{:Session} node in Neo4j \\
+\hline
+/students/\allowbreak logout & POST & Bearer & Sets \texttt{Session.\allowbreak revoked\_at} in Neo4j \\
+\hline
+/students/\allowbreak me/\allowbreak profile & GET & Bearer & Reads \texttt{Student} node from Neo4j \\
+\hline
+/students/\allowbreak me/\allowbreak streak & GET & Bearer & Evaluates UTC activity dates from Neo4j \\
+\hline
+/students/\allowbreak me/\allowbreak streak/\allowbreak restore & POST & Bearer & Spends 10 Energy to bridge 1 missed day \\
+\hline
+/students/\allowbreak me/\allowbreak energy & GET & Bearer & Reads \texttt{Student.energy} from Neo4j \\
+\hline
+/students/\allowbreak me/\allowbreak nudge & GET & Bearer & Finds soonest due quiz \& flashcard items \\
+\hline
+/quiz/\allowbreak topics & GET & None & Reads distinct \texttt{topic\_tag} from PostgreSQL \\
+\hline
+/quiz/\allowbreak topics/\allowbreak\{path\}/\allowbreak questions & GET & None & Reads sanitised questions from PostgreSQL \\
+\hline
+/quiz/\allowbreak questions/\allowbreak\{uid\}/\allowbreak check & POST & None & In-memory answer verification (Stateless) \\
+\hline
+/quiz/\allowbreak topics/\allowbreak\{path\}/\allowbreak sessions & POST & Bearer & Creates \texttt{QuizSession} node in Neo4j \\
+\hline
+/quiz/\allowbreak questions/\allowbreak\{uid\}/\allowbreak log & POST & Bearer & Creates \texttt{QUIZ\_\allowbreak ANSWER} \& updates \texttt{REVIEWING} edge \\
+\hline
+/quiz/\allowbreak sessions/\allowbreak\{id\}/\allowbreak end & POST & Bearer & Aggregates score, awards Energy in Neo4j \\
+\hline
+/quiz/\allowbreak review/\allowbreak due & GET & Bearer & Queries \texttt{REVIEWING} edges where \texttt{next\_review\_at} $\leq$ now \\
+\hline
+/quiz/\allowbreak mastery & PUT & Bearer & Overwrites \texttt{:MASTERS} edge \texttt{p\_know} in Neo4j \\
+\hline
+/quiz/\allowbreak mastery/\allowbreak params & GET & Bearer & Runs / caches Baum-Welch EM fit on pooled events \\
+\hline
+/flashcards/\allowbreak cards & GET & None & Projects questions to flashcard models \\
+\hline
+/flashcards/\allowbreak cards/\allowbreak\{uid\}/\allowbreak reveal & POST & None & Returns card back text \& explanation \\
+\hline
+/flashcards/\allowbreak sessions & POST & Bearer & Creates \texttt{FlashcardSession} in Neo4j \\
+\hline
+/flashcards/\allowbreak cards/\allowbreak\{uid\}/\allowbreak log & POST & Bearer & Creates \texttt{FLASHCARD\_\allowbreak REVIEW} \& updates \texttt{Flashcard} node \\
+\hline
+/flashcards/\allowbreak sessions/\allowbreak\{id\}/\allowbreak end & POST & Bearer & Marks \texttt{FlashcardSession.\allowbreak status = 'completed'} \\
+\hline
+/flashcards/\allowbreak review/\allowbreak due & GET & Bearer & Queries \texttt{Flashcard} nodes where \texttt{next\_review\_at} $\leq$ now \\
+\hline
+\end{longtable}
+\endgroup
+
+% ────────────────────────────────────────────────────────────
+\subsection*{Mathematical Foundations \& Algorithms}
+
+\subsubsection*{Bayesian Knowledge Tracing (BKT) with Confidence Emissions}
+
+Standard BKT models a student's latent knowledge of a specific medical topic as a 2-state
+Hidden Markov Model:
+
 \begin{itemize}
-    \item Understand the project
-    \item Add new features
-    \item Maintain the codebase
+    \item \textbf{State 0:} \textit{Doesn't Know}
+    \item \textbf{State 1:} \textit{Knows}
 \end{itemize}
+
+To account for metacognitive awareness, emission probabilities $p_{\text{slip}}$ and
+$p_{\text{guess}}$ are conditioned on the student's self-reported confidence
+$c \in \{\text{confident},\,\text{unsure},\,\text{guessing}\}$:
+
+\begin{center}
+\begin{tabular}{|l|c|c|>{\raggedright\arraybackslash}p{0.48\linewidth}|}
+\hline
+\textbf{Confidence ($c$)} & $p_{\text{slip}}$ & $p_{\text{guess}}$ & \textbf{Pedagogical Interpretation} \\
+\hline
+\textbf{Confident} & $0.05$ & $0.10$ & Confident-wrong strongly penalises $p_{\text{know}}$ as a misconception. \\
+\hline
+\textbf{Unsure} & $0.10$ & $0.25$ & Standard baseline BKT behaviour. \\
+\hline
+\textbf{Guessing} & $0.30$ & $0.50$ & Correct guess does not falsely award mastery. \\
+\hline
+\end{tabular}
+\end{center}
+
+\textbf{Observation Update (Bayes Rule):} Given prior mastery $p_{\text{know}}$ and observation
+$O_t \in \{\text{Correct},\,\text{Incorrect}\}$ with confidence $c$:
+
+\[
+O_t = \text{Correct}: \quad
+p_{\text{know}}^{\text{post}} = \frac{p_{\text{know}} \cdot (1 - p_{\text{slip}}[c])}
+  {p_{\text{know}} \cdot (1 - p_{\text{slip}}[c]) + (1 - p_{\text{know}}) \cdot p_{\text{guess}}[c]}
+\]
+
+\[
+O_t = \text{Incorrect}: \quad
+p_{\text{know}}^{\text{post}} = \frac{p_{\text{know}} \cdot p_{\text{slip}}[c]}
+  {p_{\text{know}} \cdot p_{\text{slip}}[c] + (1 - p_{\text{know}}) \cdot (1 - p_{\text{guess}}[c])}
+\]
+
+\textbf{Learning State Transition} (accounting for knowledge acquisition during the attempt):
+\[
+p_{\text{know}}^{\text{next}} = p_{\text{know}}^{\text{post}} + (1 - p_{\text{know}}^{\text{post}}) \cdot p_{\text{transit}}
+\]
+
+\subsubsection*{Baum-Welch Expectation-Maximisation (EM) Parameter Fitting}
+
+Implemented in \texttt{src/quiz/bkt\_fit.py}, the Baum-Welch EM algorithm fits optimal global
+parameters across all pooled student sequences:
+
+\begin{enumerate}
+    \item \textbf{E-Step (Forward-Backward Rescaling):} Compute smoothed posterior state
+          probabilities $\gamma_t(i) = P(S_t = i \mid \mathbf{O})$ and transition probabilities
+          $\xi_t(0,1) = P(S_t = 0,\, S_{t+1} = 1 \mid \mathbf{O})$.
+    \item \textbf{M-Step (Closed-Form Aggregation):}
+\end{enumerate}
+
+\[
+p_{\text{init}} = \frac{1}{|\mathcal{S}|} \sum_{s \in \mathcal{S}} \gamma_0^{(s)}(1)
+\qquad
+p_{\text{transit}} = \frac{\sum_{s} \sum_{t} \xi_t^{(s)}(0,1)}{\sum_{s} \sum_{t} \gamma_t^{(s)}(0)}
+\]
+
+\[
+\forall c:\;
+p_{\text{slip}}[c] = 1 - \frac{\sum_{s} \sum_{t:\,O_t=\text{Correct},\,C_t=c} \gamma_t^{(s)}(1)}
+  {\sum_{s} \sum_{t:\,C_t=c} \gamma_t^{(s)}(1)}
+\qquad
+p_{\text{guess}}[c] = \frac{\sum_{s} \sum_{t:\,O_t=\text{Correct},\,C_t=c} \gamma_t^{(s)}(0)}
+  {\sum_{s} \sum_{t:\,C_t=c} \gamma_t^{(s)}(0)}
+\]
+
+\subsubsection*{Dual-Track Spaced Repetition Scheduling}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth]{images/mermaid_spaced_repetition.pdf}
+    \caption{Dual-track spaced repetition: Quiz track (REVIEWING edge) and Flashcard track
+             (SuperMemo self-rating intervals).}
+\end{figure}
+
+The two tracks use distinct scheduling mechanics:
+
+\begin{itemize}
+    \item \textbf{Quiz Track} (\texttt{(Student)-[:REVIEWING]->(Question)} edge): Correct +
+          Confident $\Rightarrow$ \texttt{streak += 1}, \texttt{interval = min(60, interval$\times$2)}.
+          Wrong or low-confidence $\Rightarrow$ reset: \texttt{streak = 0}, \texttt{interval = 1}.
+    \item \textbf{Flashcard Track} (\texttt{Flashcard} node):
+          \textit{Again} $\Rightarrow$ reset to 1 day;
+          \textit{Hard} $\Rightarrow$ interval $\times$ 1.2;
+          \textit{Good} $\Rightarrow$ streak $+1$, interval $\times$ 2.0;
+          \textit{Easy} $\Rightarrow$ streak $+1$, interval $\times$ 2.5. All capped at 60 days.
+\end{itemize}
+
+\subsubsection*{Gamification Economy: Streaks, Energy \& Nudge Heuristics}
+
+\begin{enumerate}
+    \item \textbf{Consecutive Streak Tracking (\texttt{src/student\_kg/streak.py}):}
+          Evaluates distinct calendar days in UTC where the student generated at least one
+          \texttt{QUIZ\_ANSWER} or \texttt{FLASHCARD\_\allowbreak REVIEW}. A gap $\geq 2$ days resets
+          \texttt{current\_streak = 0} while \texttt{previous\_streak} retains the broken length.
+    \item \textbf{Streak Restoration (\texttt{POST /students/me/streak/restore}):}
+          If the student missed exactly 1 day, they spend \textbf{10 Energy} units to bridge
+          the gap and restore their previous streak.
+    \item \textbf{Energy Ledger (\texttt{src/student\_kg/energy.py}):}
+          Earned: $+5$ per Quiz Session completion, $+1$ per Flashcard Review.
+          Spent: $-10$ per Streak Restore.
+    \item \textbf{Nudge Recommendation Engine (\texttt{GET /students/me/nudge}):}
+          Aggregates total due quiz questions and due flashcards, identifying the single item
+          with $\min(\texttt{next\_review\_at})$ across both modes to populate the top
+          dashboard reminder card.
+\end{enumerate}
+
+% ────────────────────────────────────────────────────────────
+\subsection*{Operations, Runbook \& Local Setup}
+
+\subsubsection*{Backend \& Infrastructure Bootstrapping}
+
+\textbf{Prerequisites:} macOS or Linux, \texttt{uv} package manager, Docker \& Docker Compose.
+
+\begin{enumerate}
+    \item \textbf{Setup Environment \& Databases:}
+\begin{verbatim}
+# Navigate to backend repo
+cd intelligent-tutoring-system-for-medical-student
+
+# Configure environment variables
+cp .env.example .env
+
+# Start Neo4j, PostgreSQL, and MinIO containers
+docker compose up -d postgres neo4j minio
+
+# Synchronize Python dependencies via uv
+uv sync
+\end{verbatim}
+
+    \item \textbf{Populate Seed Data:}
+\begin{verbatim}
+# Populate PostgreSQL mcq_questions table
+uv run python scripts/populate_mcq_postgres.py
+
+# (Optional) Populate synthetic student interactions
+uv run python scripts/generate_dummy_interactions.py
+\end{verbatim}
+
+    \item \textbf{Launch Live FastAPI Server:}
+\begin{verbatim}
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+\end{verbatim}
+Verify: \texttt{curl http://localhost:8000/health} $\to$ \texttt{\{"status":"ok"\}}.
+Interactive Swagger docs: \texttt{http://localhost:8000/docs}.
+\end{enumerate}
+
+\subsubsection*{iPadOS Client Setup \& Compilation}
+
+\textbf{Prerequisites:} Xcode 16.0$+$ (iPadOS 26.5$+$ SDK); Simulator or Physical iPad with
+Developer Mode enabled.
+
+\begin{enumerate}
+    \item \textbf{Configure Host IP} in
+          \texttt{Core/Networking/APIConfig.swift}:
+\begin{verbatim}
+enum APIConfig {
+    // Set to local development machine IP on LAN
+    static let baseURL = URL(string: "http://10.67.52.231:8000")!
+}
+\end{verbatim}
+
+    \item \textbf{Open Project \& Run:}
+\begin{verbatim}
+cd personalized-learning-ios
+open personalized-medical-learning-ios.xcodeproj
+\end{verbatim}
+Select an iPad simulator (e.g.\ iPad Pro 13-inch) in \textbf{Landscape Orientation} and
+press \texttt{Cmd + R}.
+\end{enumerate}
+
+\subsubsection*{Dataset Ingestion \& Content Regeneration}
+
+To process new textbook PDFs through the multimodal pipeline:
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\linewidth]{images/mermaid_ingestion_runbook.pdf}
+    \caption{Dataset ingestion runbook: PDF $\to$ ingest script $\to$ MCQ notebook $\to$
+             PostgreSQL population.}
+\end{figure}
+
+\begin{verbatim}
+# 1. Run MinerU + Post-Process + Captioning + Chunking
+uv run python scripts/ingest_data.py --pdf data/textbook/Ganongs_Physiology.pdf
+
+# 2. Open and run notebooks/mcq_generation.ipynb end-to-end
+# Generates notebooks/mcq_output/question_bank.json
+
+# 3. Reload PostgreSQL question table
+uv run python scripts/populate_mcq_postgres.py
+\end{verbatim}
+
+\subsubsection*{Verification \& Automated Test Suite}
+
+\begin{verbatim}
+# Run backend pytest suite
+cd intelligent-tutoring-system-for-medical-student
+uv run pytest -v
+\end{verbatim}
+
+% ────────────────────────────────────────────────────────────
+\subsection*{Developer Extension Guide \& Future Roadmap}
+
+\subsubsection*{Recipe: Adding a New Backend Endpoint}
+
+To expose a new API endpoint (e.g.\ \texttt{POST /students/me/bookmarks}):
+
+\begin{enumerate}
+    \item \textbf{Define Schema:} Add request/response Pydantic models to \texttt{app/schemas.py}.
+    \item \textbf{Implement Domain Logic:} Add graph query functions in
+          \texttt{src/student\_kg/}.
+    \item \textbf{Register Router Route:} Add a route handler to
+          \texttt{app/routers/students.py} specifying \texttt{@router.post(...)}.
+    \item \textbf{Configure Auth Allowlist (If Public):} If unauthenticated, update regex rules
+          in \texttt{app/auth\_middleware.py}.
+    \item \textbf{Add Tests:} Create corresponding test cases in \texttt{tests/}.
+\end{enumerate}
+
+\subsubsection*{Recipe: Adding a New iPadOS Feature / View}
+
+To implement a new feature view (e.g.\ \texttt{BookmarksView}):
+
+{\sloppy
+\begin{enumerate}
+    \item \textbf{Declare Protocol Method:} Add the \texttt{async} API signature to
+          \texttt{Core/\allowbreak Networking/\allowbreak APIClientProtocol.swift}.
+    \item \textbf{Implement Network Call:} Implement the method in
+          \texttt{Features/\allowbreak Bookmark/\allowbreak BookmarkAPI.swift}
+          using \texttt{client.get(...)} or \texttt{client.send(...)}.
+    \item \textbf{Build ViewModel:} Create \texttt{BookmarkViewModel} conforming to
+          \texttt{ObservableObject} marked \texttt{@MainActor}, holding \texttt{@Published} state
+          and injecting \texttt{any APIClientProtocol}.
+    \item \textbf{Construct SwiftUI View:} Build the interface in
+          \texttt{BookmarkView.swift} observing \texttt{BookmarkViewModel}.
+    \item \textbf{Register Navigation:} Add an enum case to \texttt{SidebarItem} in
+          \texttt{Core/\allowbreak UI/\allowbreak SidebarView.swift} and wire the switch statement in
+          \texttt{App/\allowbreak RootView.swift}.
+\end{enumerate}
+\par}
+
+\subsubsection*{Known Technical Debt \& Architectural Decisions}
+
+{\sloppy
+\begin{enumerate}
+    \item \textbf{Uniqueness Constraints on Question \& Topic Identifiers:}
+          \texttt{src/\allowbreak student\_kg/\allowbreak driver.py::\allowbreak ensure\_\allowbreak constraints}
+          guarantees uniqueness for \texttt{Student.\allowbreak student\_\allowbreak number} and \texttt{Session.\allowbreak token\_hash}. Future maintainers
+          should add explicit Cypher unique constraints for \texttt{Question.uid},
+          \texttt{Flashcard.uid}, and \texttt{Topic.path}.
+
+    \item \textbf{CI/CD Automation:}
+          Currently, \texttt{pytest} is executed manually. A GitHub Actions workflow
+          (\texttt{.github/workflows/ci.yml}) should be configured to run linting
+          (\texttt{ruff}) and test suites on pull requests.
+
+    \item \textbf{Automating MCQ Generation CLI:}
+          \texttt{notebooks/mcq\_generation.ipynb} is executed interactively. Wrapping its
+          6 steps into a standalone CLI script (\texttt{scripts/generate\_mcqs.py}) will
+          allow fully automated end-to-end pipelines from raw PDF to PostgreSQL.
+
+    \item \textbf{Domain KG (\texttt{src/domain\_kg}) Live Integration:}
+          The medkg pipeline generates rich RDF N-Quads and UMLS links. A valuable future
+          milestone is loading \texttt{graph.nq} directly into Neo4j via the \texttt{n10s}
+          (Neosemantics) plugin to enable prerequisite-aware question recommendation.
+
+    \item \textbf{Dynamic Backend Configuration on iOS:}
+          \texttt{APIConfig.baseURL} is currently a constant. Implementing a debug settings
+          switcher or \texttt{.xcconfig} build flavours will simplify switching between local,
+          staging, and production backends.
+\end{enumerate}
+\par}

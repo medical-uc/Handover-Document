@@ -1,0 +1,10 @@
+flowchart LR
+    MD["Tagged Markdown\n(con, def, clin tags)"] --> Stg1["Stage 1: Parse\n(Normalize offsets)"]
+    Stg1 --> Stg2["Stage 2: Extract\n(scispaCy NER + HuatuoGPT Relations)"]
+    Stg2 --> Stg3["Stage 3: Link\n(SapBERT + FAISS -> UMLS CUI)"]
+    Stg3 --> Stg4["Stage 4: Postcoord\n(Mint INSTANCE nodes)"]
+    Stg4 --> Stg5["Stage 5: Images\n(Caption NER Depictions)"]
+    Stg5 --> Stg6["Stage 6: Assert\n(RDF Named Quads)"]
+    Stg6 --> Stg7["Stage 7: Reason\n(OWL-RL Materialization)"]
+    Stg7 --> Stg8["Stage 8: Serve\n(N-Quads / SPARQL / Neo4j n10s)"]
+    Stg6 --> MCQExt["mcq.py\n(Graph-grounded MCQs)"]

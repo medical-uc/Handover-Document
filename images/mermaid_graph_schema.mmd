@@ -1,0 +1,46 @@
+flowchart TB
+    subgraph Neo4jGraph["Neo4j Student Knowledge Graph Schema"]
+        Student(("Student\n- id: UUID\n- full_name: String\n- student_number: String\n- academic_year: Int\n- energy: Int"))
+
+        AuthSess(("Session\n- token_hash: String\n- issued_at: DateTime\n- expires_at: DateTime\n- revoked_at: DateTime?"))
+
+        Genesis["InteractionEvent:ENROLLMENT\n- id: UUID\n- ts: DateTime"]
+
+        QSess["InteractionEvent:QuizSession\n- id: UUID\n- topic_path: String\n- status: in_progress/completed/cancelled\n- ts: DateTime"]
+
+        Answer["InteractionEvent:QUIZ_ANSWER\n- id: UUID\n- question_uid: String\n- selected_index: Int\n- correct: Boolean\n- confidence: guessing/unsure/confident\n- time_taken_seconds: Float\n- ts: DateTime"]
+
+        FSess["InteractionEvent:FlashcardSession\n- id: UUID\n- topic_path: String?\n- card_uids: List\n- status: in_progress/completed/cancelled\n- ts: DateTime"]
+
+        Review["InteractionEvent:FLASHCARD_REVIEW\n- id: UUID\n- question_uid: String\n- rating: again/hard/good/easy\n- ts: DateTime"]
+
+        Question(("Question\n- uid: String"))
+
+        Flashcard(("Flashcard\n- uid: SHA1(studentId+questionUid)\n- streak: Int\n- interval_days: Float\n- next_review_at: DateTime"))
+
+        Topic(("Topic\n- path: String\n- name: String"))
+
+        Student -- HAS_SESSION --> AuthSess
+        Student -- HAS_EVENT --> Genesis
+        Student -- HAS_EVENT --> QSess
+        Student -- HAS_EVENT --> FSess
+
+        Genesis -- NEXT --> QSess
+        QSess -- NEXT --> Answer
+        Student -. LATEST_EVENT .-> Answer
+
+        Student -- ATTEMPTED --> QSess
+        QSess -- HAS_ANSWER --> Answer
+        Answer -- FOR_QUESTION --> Question
+        Student -- "REVIEWING\n{streak, interval_days, next_review_at}" --> Question
+
+        Student -- ATTEMPTED --> FSess
+        FSess -- HAS_ANSWER --> Review
+        Review -- FOR_FLASHCARD --> Flashcard
+        Student -- HAS_FLASHCARD --> Flashcard
+        Flashcard -- FOR_QUESTION --> Question
+
+        Question -- BELONGS_TO --> Topic
+        Topic -- SUB_TOPIC_OF --> Topic
+        Student -- "MASTERS\n{p_know, updated_at}" --> Topic
+    end

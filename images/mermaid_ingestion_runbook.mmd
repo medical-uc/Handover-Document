@@ -1,0 +1,4 @@
+flowchart LR
+    A["Raw PDF in data/textbook/"] --> B["uv run python scripts/ingest_data.py --pdf file.pdf"]
+    B --> C["Execute notebooks/mcq_generation.ipynb"]
+    C --> D["uv run python scripts/populate_mcq_postgres.py"]

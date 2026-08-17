@@ -1,0 +1,32 @@
+flowchart TB
+    subgraph OfflineInfra["Offline Ingestion & Model Serving Topology"]
+        direction TB
+        subgraph LocalHost["Local Ingestion Machine (Mac / Linux GPU)"]
+            PyIngest["scripts/ingest_data.py (.venv, Python 3.13)"]
+            MinerUSub["MinerU Subprocess (.venv-mineru, Python 3.10)"]
+            LocalVL["QwenVLCaptioner (MPS / CUDA Device Allocation)"]
+            PyIngest --> MinerUSub
+            PyIngest --> LocalVL
+        end
+
+        subgraph RemoteInference["Remote GPU Server (vLLM / llama.cpp Cluster)"]
+            VLLM_Server["vLLM OpenAI-Compatible Server (:8000/v1)"]
+            Model_Huatuo["HuatuoGPT-o1-72B-4bit"]
+            Model_Qwen["Qwen3.5-27B"]
+            VLLM_Server --- Model_Huatuo & Model_Qwen
+        end
+
+        PyIngest -. "HTTP REST (OpenAI SDK)" .-> VLLM_Server
+    end
+
+    subgraph ProductionServing["Production Live Serving Topology"]
+        direction TB
+        ClientApp["iPadOS Client (MediQuiz.app)"]
+        FastAPIHost["FastAPI App (uvicorn app.main:app)"]
+        PG[(PostgreSQL Service)]
+        N4J[(Neo4j Community Graph DB)]
+
+        ClientApp <== "HTTP/HTTPS (Opaque Bearer Token)" ==> FastAPIHost
+        FastAPIHost <--> PG
+        FastAPIHost <--> N4J
+    end

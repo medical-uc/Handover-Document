@@ -1,0 +1,37 @@
+flowchart TD
+    subgraph ContentPipeline["1. Offline Content Ingestion & AI Generation"]
+        A1["Medical Textbook PDF"] --> A2["MinerU CLI (Layout & Text Extraction)"]
+        A2 --> A3["8-Stage Post-Process Engine (Rule-based Cleanup)"]
+        A2 --> A4["Visual Image Extraction"]
+        A4 --> A5["Qwen2.5-VL Captioning Model"]
+        A3 & A5 --> A6["Unified Markdown Assembler (unify.py)"]
+        A6 --> A7["Semantic Chunker (all-MiniLM-L6-v2)"]
+        A7 --> A8["6-Step MCQ Generator (Qwen3.5-27B / HuatuoGPT)"]
+        A8 --> A9[("PostgreSQL Table: mcq_questions")]
+    end
+
+    subgraph PersonalizationPipeline["2. Bayesian Knowledge Tracing Training"]
+        B1[(Neo4j QUIZ_ANSWER Events)] --> B2["Baum-Welch EM Fitting (src/quiz/bkt_fit.py)"]
+        B2 --> B3["GET /quiz/mastery/params"]
+    end
+
+    subgraph ClientInteraction["3. Live Student Learning Interaction"]
+        C1["Student Launches iPad App"] --> C2["Login / Register -> Keychain Session"]
+        C2 --> C3["Dashboard: Fetch Streak, Energy, Nudge, & BKT Params"]
+        C3 --> C4{"Choose Learning Mode"}
+
+        C4 -->|Quiz Flow| C5["QuizSetup: Single, Multi-Topic, or Due Batch"]
+        C5 --> C6["Quiz Taking: Instant Option Check (/check)"]
+        C6 --> C7["On-Device BKT p_know Update (BKTStore)"]
+        C7 --> C8["Async PUT /quiz/mastery"]
+        C8 --> C9["Submit Confident Log (/log) -> Update Graph Schedule"]
+        C9 --> C10["End Session -> Award Energy & Update Streak"]
+
+        C4 -->|Flashcard Flow| C11["FlashcardSetup: Due Cards First + Weakest Topics"]
+        C11 --> C12["Reveal Card & Rate (Again / Hard / Good / Easy)"]
+        C12 --> C13["Log Review -> SuperMemo Interval Update"]
+        C13 --> C14["End Session -> Award Energy"]
+    end
+
+    A9 -. "Loaded via src/quiz/bank.py" .-> C6
+    B3 -. "Cached in BKTStore" .-> C7

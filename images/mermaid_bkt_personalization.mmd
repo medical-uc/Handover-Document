@@ -1,0 +1,40 @@
+flowchart TB
+    subgraph ServerFit["Server-Side Population Parameter Fitting"]
+        A1[("Neo4j: Pooled QUIZ_ANSWER Events")] --> A2["Extract Student, Topic, Correct, Confidence Sequences"]
+        A2 --> A3["Baum-Welch EM Algorithm"]
+        A3 --> A4["E-Step: Forward-Backward Rescaling"]
+        A4 --> A5["M-Step: Global Parameter Estimation"]
+        A5 --> A6["GET /quiz/mastery/params Response"]
+    end
+
+    subgraph ClientBKT["Client-Side Real-Time Personalization"]
+        B1["BKTStore.refreshParamsIfNeeded()"]
+        B2["Student Answers Question"]
+        B3["Select p_slip and p_guess for confidence level"]
+        B4["Bayesian Posterior: p_know_post = P(Know | Observation)"]
+        B5["State Transition: p_know_next = p_know_post + (1 - p_know_post) * p_transit"]
+        B6["Save p_know in UserDefaults"]
+        B7["Fire-and-Forget: PUT /quiz/mastery"]
+        B1 --> B3
+        B2 --> B3
+        B3 --> B4
+        B4 --> B5
+        B5 --> B6
+        B6 --> B7
+    end
+
+    A6 -- Fetches Params --> B1
+
+    subgraph Consumers["Downstream Personalization Delivery"]
+        C1["Quiz Multi-Topic: selectWeightedByWeakness()"]
+        C2["Flashcards: Prioritize by Weakest Topics"]
+        C3["Neo4j MASTERS Edges Updated"]
+        C4["Dashboard Nudge Recommendations"]
+        C5["SubjectsView: Mastery Progress Bars"]
+    end
+
+    B6 --> C1
+    B6 --> C2
+    B7 --> C3
+    C3 --> C4
+    C3 --> C5
