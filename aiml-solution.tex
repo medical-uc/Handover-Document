@@ -153,30 +153,92 @@ before knowledge-graph construction.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection*{Model Experiment}
 
-\noindent All models are used in an \textbf{inference-only} setup — no fine-tuning or
-backpropagation. The list below documents each model's role, configuration, and validation:
+\noindent All models are deployed in an \textbf{inference-only} setup — no fine-tuning or
+backpropagation during live serving. The list below documents each model's role, architectural
+hyperparameters, operational runtime configuration, fallback defaults, and validation mechanisms
+across the pipeline:
 
 {\sloppy
 \begin{itemize}
-    \item \textbf{HuatuoGPT-o1-72B (4-bit)} (\textit{LLM, Reasoning})
+    \item \textbf{HuatuoGPT-o1-72B (4-bit)} (\textit{Medical Reasoning LLM})
     \begin{itemize}
-        \item \textbf{Role:} Document rewriting (\texttt{rewrite\_medical\_md.py}); Stage~2 relation \& modifier extraction (\texttt{medkg/stage2\_extract.py})
-        \item \textbf{Configuration:} OpenAI-compatible vLLM endpoint; chain-of-thought traces stripped on the client side
-        \item \textbf{Validation:} Tag-completeness check; Pydantic schema validation (\texttt{Triple}, \texttt{Modifier})
+        \item \textbf{Role:} Document rewriting and semantic tagging (\texttt{rewrite\_medical\_md.py}); Stage~2 relation and modifier extraction (\texttt{medkg/stage2\_extract.py}); Stage~3 ambiguous concept reranking (\texttt{medkg/stage3\_link.py}).
+        \item \textbf{Configuration \& Hyperparameters:}
+        \begin{itemize}[itemsep=1pt,topsep=1pt]
+            \item \textit{Checkpoint \& Backend:} \texttt{mlx-community/HuatuoGPT-o1-72B-4bit} served via an OpenAI-compatible vLLM/MLX endpoint (\texttt{DEFAULT\_BASE\_URL = "http://jupyter-02.aml1.id.iosda.org:8888"}, default fallback \texttt{http://localhost:8888}).
+            \item \textit{Rewriter Sampling:} Section-specific temperatures: $T_{\text{topic}} = 0.30$, $T_{\text{caption}} = 0.15$ (strict factual alignment), $T_{\text{objectives}} = 0.35$, $T_{\text{summary}} = 0.35$, fallback $T = 0.40$; top-$p = 0.90$.
+            \item \textit{Rewriter Token Limits:} $\text{max\_tokens} = 1024$ for \texttt{<topic>} and \texttt{<cap>}; $\text{max\_tokens} = 2048$ for \texttt{<obj>}, \texttt{<sum>}, and general completions.
+            \item \textit{Stage 2 Extraction:} Greedy decoding ($T = 0.0$, $\text{max\_tokens} = 4096$) with vLLM guided JSON decoding (\texttt{extra\_body=\allowbreak\{"guided\_json": schema\}}).
+            \item \textit{Stage 3 Disambiguation:} Greedy decoding ($T = 0.0$, $\text{max\_tokens} = 24$) with guided choice (\texttt{extra\_body=\allowbreak\{"guided\_choice": choices\}}), cached per \texttt{(mention, choices)} tuple.
+            \item \textit{Execution \& Resilience:} 900\,s timeout (rewriter) / 300\,s timeout (Stage 2); 4 retries with exponential backoff; 4 concurrent worker threads; SHA-256 payload disk caching; client-side chain-of-thought stripping (\texttt{split\_reasoning} discarding \texttt{\#\# Thinking} and \texttt{<think>} traces); circuit breaker halting after 5 consecutive failures (\texttt{BackendUnavailable}); \texttt{--offline} rule-based fallback.
+        \end{itemize}
+        \item \textbf{Validation:} Tag-completeness checks; exact-match chunk text grounding; Pydantic schema validation (\texttt{Triple}, \texttt{Modifier}); closed 27-relation taxonomy guards.
     \end{itemize}
 
-    \item \textbf{SapBERT} (\textit{Sentence Transformer})
+    \item \textbf{SapBERT} (\textit{Biomedical Sentence Transformer})
     \begin{itemize}
-        \item \textbf{Role:} Stage~3 entity linking to UMLS/SNOMED CT (\texttt{medkg/stage3\_link.py})
-        \item \textbf{Configuration:} FAISS \texttt{IndexFlatIP}; cosine similarity floor 0.70; optional LLM reranking
-        \item \textbf{Validation:} Link-confidence distribution; CUI collision detection
+        \item \textbf{Role:} Stage~3 entity linking to UMLS/SNOMED CT concepts (\texttt{medkg/stage3\_link.py}).
+        \item \textbf{Configuration \& Hyperparameters:}
+        \begin{itemize}[itemsep=1pt,topsep=1pt]
+            \item \textit{Checkpoint \& Pooling:} \texttt{cambridgeltl/SapBERT-from-PubMedBERT-fulltext} ($d = 768$); $[CLS]$ token representation from \texttt{last\_hidden\_state}; unit $L_2$-normalization.
+            \item \textit{Index \& Search:} FAISS \texttt{IndexFlatIP} (Exact Inner Product on normalized vectors $\equiv$ Cosine Similarity); candidate retrieval depth $k = 20$; sequence length capped at 32 tokens; batch size 256.
+            \item \textit{Thresholds:} Cosine similarity floor $\ge 0.70$ (\texttt{LINK\_CONFIDENCE\_FLOOR = 0.70}); LLM reranker invoked only when top-2 candidate margin $(\text{score}_1 - \text{score}_2) < 0.05$ (\texttt{RERANK\_MARGIN = 0.05}).
+            \item \textit{Concurrency Safety:} Native thread pinning (\texttt{MEDKG\_NATIVE\_THREADS = 1}) across OpenMP, PyTorch, and FAISS runtimes to prevent macOS Darwin/BLIS segmentation faults.
+            \item \textit{Semantic Typing:} UMLS \texttt{MRSTY.RRF} crosswalk (\texttt{semantic\_types.json}) applying \texttt{SEMANTIC\_TYPE\_PRIORITY} to refine coarse NER labels into canonical ontology span labels.
+        \end{itemize}
+        \item \textbf{Validation:} Link-confidence distribution; CUI collision detection; semantic type compatibility checks.
     \end{itemize}
 
-    \item \textbf{Qwen3.5-27B} (\textit{LLM})
+    \item \textbf{Qwen3.5-27B / Qwen3.5-9B-OptiQ} (\textit{LLM})
     \begin{itemize}
-        \item \textbf{Role:} MCQ question-stem generation, self-critique, and distractor evaluation (\texttt{medkg/mcq.py})
-        \item \textbf{Configuration:} Single correction cycle
-        \item \textbf{Validation:} Pydantic schema validation (\texttt{DistractorSet}, \texttt{Critique}); negative-stem guard; 300-char stem cap
+        \item \textbf{Role:} MCQ question-stem phrasing, distractor evaluation, and automated self-critique loop (\texttt{medkg/mcq.py}).
+        \item \textbf{Configuration \& Hyperparameters:}
+        \begin{itemize}[itemsep=1pt,topsep=1pt]
+            \item \textit{Checkpoint \& Backend:} \texttt{Qwen/Qwen3.5-27B} or \texttt{mlx-community/Qwen3.5-9B-OptiQ-4bit} via OpenAI-compatible endpoint (\texttt{http://localhost:8888/v1}); $T = 0.0$, $\text{max\_tokens} = 4096$, guided JSON schema decoding.
+            \item \textit{Batching \& Limits:} Batch size of 10 items per phrasing pass (\texttt{phrase\_items}); maximum stem length capped at 300 characters; 5 options per question (1 key + 4 distractors).
+            \item \textit{Distractor Safety Guardrails:} 3-tier open-world exclusion (asserted/inferred/flagged triple blocklist; alternate head-edge prohibition; indefinite stem framing); negative-stem regex guard (\texttt{\_NEGATIVE\_RE}) rejecting negative phrasing to prevent open-world fallacies.
+            \item \textit{Self-Critique Cycle:} Automated critique and corrector loop evaluating distractor plausibility and answer leakage.
+        \end{itemize}
+        \item \textbf{Validation:} Pydantic schema validation (\texttt{DistractorSet}, \texttt{Critique}); negative-stem guard; stem character ceiling.
+    \end{itemize}
+
+    \item \textbf{Qwen2.5-VL-7B-Instruct \& 3B-Instruct} (\textit{Vision-Language Model})
+    \begin{itemize}
+        \item \textbf{Role:} Textbook diagram/figure visual captioning (\texttt{src/captioning/qwen\_vl.py}), full-page OCR transcription (Thread B), and exam PDF question extraction.
+        \item \textbf{Configuration \& Hyperparameters:}
+        \begin{itemize}[itemsep=1pt,topsep=1pt]
+            \item \textit{Precision \& Placement:} \texttt{torch.bfloat16}; two-stage load (CPU $\to$ MPS/CUDA) bypassing Apple Silicon MPS fp16 kernel crashes; lazy instantiation with explicit garbage collection and cache clearance (\texttt{torch.mps.empty\_cache()}).
+            \item \textit{Visual Captioning:} $\text{max\_new\_tokens} = 512$, deterministic greedy decoding ($\text{do\_sample} = \text{False}$), grounded with MinerU OCR labels.
+            \item \textit{Page Transcription:} $\text{max\_new\_tokens} = 2048$, $\text{max\_pixels} = 1{,}280{,}000$ (~1.28M px) bounding vision prefill token overhead on MPS.
+            \item \textit{Image Relevance:} $\text{max\_new\_tokens} = 5$, $\text{max\_pixels} = 480{,}000$, single-token classification (\texttt{SEMANTIC} vs.\ \texttt{DECORATIVE}).
+        \end{itemize}
+        \item \textbf{Validation:} Visual grounding against MinerU OCR text labels; single-word relevance classification output validation.
+    \end{itemize}
+
+    \item \textbf{scispaCy \& NegEx} (\textit{Biomedical NER \& Negation Detection})
+    \begin{itemize}
+        \item \textbf{Role:} Stage~2 entity recognition and negation detection (\texttt{medkg/stage2\_extract.py}).
+        \item \textbf{Configuration:} Multi-model pipeline (\texttt{en\_ner\_bc5cdr\_md} for diseases/chemicals, \texttt{en\_ner\_bionlp13cg\_md} for anatomy/cells/proteins); \texttt{AbbreviationDetector} and \texttt{Negex} over all entity types; longest-span-first entity merging.
+        \item \textbf{Validation:} Cross-model span deduplication; ontology label mapping per \texttt{NER\_LABEL\_MAPS}.
+    \end{itemize}
+
+    \item \textbf{all-MiniLM-L6-v2} (\textit{Sentence Transformer})
+    \begin{itemize}
+        \item \textbf{Role:} Semantic boundary chunking of unified text streams (\texttt{src/ingestion/semantic\_chunk.py}).
+        \item \textbf{Configuration:} Cosine distance threshold calculated at the $95.0$ percentile over each document; hard fallback split at 6000 characters.
+        \item \textbf{Validation:} Distributional percentile adaptation per textbook writing style.
+    \end{itemize}
+
+    \item \textbf{Bayesian Knowledge Tracing \& Spaced Repetition Algorithms} (\textit{Probabilistic \& Cognitive Models})
+    \begin{itemize}
+        \item \textbf{Role:} Real-time student mastery tracking and personalized quiz/flashcard review scheduling (\texttt{src/quiz/}, \texttt{src/flashcards/}, \texttt{BKTStore.swift}).
+        \item \textbf{Configuration \& Hyperparameters:}
+        \begin{itemize}[itemsep=1pt,topsep=1pt]
+            \item \textit{BKT Engine:} 2-state Hidden Markov Model running on-device in Swift with bootstrap priors: $p_{\text{init}} = 0.30$, $p_{\text{transit}} = 0.10$, confidence-conditional slip $p_{\text{slip}}$ (0.05 confident / 0.10 unsure / 0.30 guessing), and guess $p_{\text{guess}}$ (0.10 confident / 0.25 unsure / 0.50 guessing); synced via \texttt{PUT /quiz/mastery} to Neo4j.
+            \item \textit{Spaced Repetition (Quiz):} Confidence-weighted interval progression on \texttt{(:Student)-[:REVIEWING]->(:Question)}: correct + confident doubles interval ($1 \to 2 \to 4 \to \dots \le 60\,\text{days}$); wrong or unsure resets streak to 0 (interval 1 day).
+            \item \textit{Spaced Repetition (Flashcard):} 4-point rating schedule on \texttt{(:Student)-[:HAS\_FLASHCARD]->(:Flashcard)}: \textit{Again} (0.0 / 1 day), \textit{Hard} ($1.2\times$), \textit{Good} ($2.0\times$), \textit{Easy} ($2.5\times$), capped at 60 days.
+        \end{itemize}
+        \item \textbf{Validation:} Empirical ROC-AUC next-step prediction evaluation ($0.6819$) and review interval convergence monitoring.
     \end{itemize}
 \end{itemize}\par}
 
@@ -215,10 +277,9 @@ backpropagation. The list below documents each model's role, configuration, and 
 
     \item \textbf{Final performance metrics:}
     \begin{itemize}
-        \item Total validated MCQs in bank: \textbf{188 questions}
-        \item Ingestion throughput: \texttt{post\_process\_book} cleaner runs in sub-second
-              time per PDF chapter
-        \item API serving latency: instant query response via indexed PostgreSQL and Neo4j
-              graph queries
+        \item \textit{BKT knowledge tracing validation:} Next-step correctness prediction evaluated on student interaction trajectories achieved an empirical \textbf{ROC-AUC of 0.6819} and a log-loss of \textbf{0.7105}, confirming its effectiveness in tracking evolving concept mastery and surfacing student knowledge gaps.
+        \item \textit{Question bank coverage:} Total of \textbf{188 validated MCQs} generated and structured across three cognitive difficulty tiers.
+        \item \textit{Automated critique refinement:} \textbf{62\% (116 of 188 questions)} successfully refined via the self-critique verification loop.
+        \item \textit{Ingestion throughput:} \texttt{post\_process\_book} cleaner executes deterministically in sub-second time per PDF chapter.
     \end{itemize}
 \end{itemize}

@@ -10,5 +10,27 @@ To address the varying strengths, weaknesses, and learning pace of first-year me
 
 \subsection*{Result}
 
-{\bf Show the result of the application you built as the solution. Explain its
-features, how to use it, and any notable outcomes.}
+As the solution to personalized medical learning, we developed \textbf{MediQuiz}, an Intelligent Tutoring System (ITS) and adaptive study application built natively for iPadOS. The application serves as an interactive study companion for first-year medical students, translating dense medical textbook curricula into personalized practice quizzes, spaced-repetition flashcards, and real-time knowledge tracking.
+
+\subsubsection*{Application Overview \& Core Features}
+
+MediQuiz provides an intuitive and distraction-free learning environment designed to support self-directed study through the following features:
+
+\begin{itemize}
+    \item \textbf{Adaptive Practice Quizzes:} Students can generate tailored practice quizzes from specific medical subjects (e.g., Physiology, Biochemistry, Histology, Anatomy) or construct custom multi-topic study sessions. Questions feature multiple difficulty levels ranging from fundamental recall to clinical case vignettes.
+    \item \textbf{Confidence-Based Immediate Feedback:} While answering questions, students indicate their self-reported confidence level (\textit{Confident}, \textit{Unsure}, or \textit{Guessing}). Upon selection, the application provides instant verification along with comprehensive clinical explanations to reinforce underlying concepts and correct misconceptions.
+    \item \textbf{Spaced-Repetition Flashcard Decks:} Students can review core medical facts through interactive flashcards with flip animations. By rating their recall difficulty (\textit{Again}, \textit{Hard}, \textit{Good}, \textit{Easy}), the platform dynamically calculates optimal future review dates to maximize long-term retention.
+    \item \textbf{Curriculum Exploration \& Mastery Tracking:} An interactive subject directory provides students with visual progress bars indicating their mastery level across each topic and sub-topic, making it effortless to identify weak areas and track learning progression over time.
+    \item \textbf{Smart Dashboard \& Study Nudges:} The main dashboard delivers actionable study recommendations (``nudges'') that prioritize urgent review items and topics requiring reinforcement. Daily streak counters and gamified energy rewards encourage consistent daily practice.
+    \item \textbf{Review History \& Bookmarking:} Students can bookmark challenging questions for focused revision and review past quiz attempts and historical performance summaries.
+\end{itemize}
+
+\subsubsection*{Model Outcomes \& Validation Results}
+
+The initial evaluation and operational benchmarks of the AI pipeline and adaptive models showed the following results:
+
+\begin{itemize}
+    \item \textbf{Knowledge Tracing Baseline:} On initial interaction trajectories, the Bayesian Knowledge Tracing model achieved a \textbf{ROC-AUC of 0.6819} for next-step correctness prediction, offering a functional baseline for estimating relative topic mastery and surfacing potential knowledge gaps.
+    \item \textbf{Graph-Grounded Question Synthesis:} Leveraging the biomedical knowledge graph pipeline (\texttt{knowledge-graph-pipeline}), questions are synthesized directly from asserted semantic triples across a 27-relation medical ontology. Each item anchors to a verified source sentence as an auditable rationale, using indefinite stem framing to prevent open-world factual inaccuracies.
+    \item \textbf{Multi-Tier Distractor Safety \& Semantic Guardrails:} To ensure distractors are plausible yet unambiguously incorrect, the pipeline enforces a multi-tier defense: filtering against global relation blocklists (asserted, inferred, and flagged edges), excluding cross-related concepts, and applying deterministic relation guards that prevent clinically inverted claims (such as distinguishing nutrient deficiencies from the nutrients themselves).
+\end{itemize}
