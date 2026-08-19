@@ -1,38 +1,53 @@
 %% ============================================================
-%%  Limitations and Future Improvements
+%%  Limitations and Next Steps
 %%  MediQuiz: Intelligent Tutoring System for Medical Students
 %% ============================================================
 
-\section*{Limitations and Future Improvements}
+\section*{Limitations and Next Steps}
 
 \subsection*{Limitations}
 
 \begin{itemize}
+    \item \textbf{Absence of Systematic Validation for Knowledge Graph, Retrieval, and Question Generation:}
+          While the pipeline enforces structural schema validation, deterministic relation guards, and open-world distractor safety guardrails, the system has not undergone comprehensive quantitative evaluation or expert clinical validation. Specifically:
+          (1)~the medical knowledge graph construction (triple extraction via HuatuoGPT-o1-72B and SapBERT entity linking) lacks formal precision/recall benchmarking and expert medical ontology audit against gold-standard annotated corpora;
+          (2)~the GraphRAG and semantic retrieval mechanisms have not been quantitatively benchmarked using standard information retrieval metrics (e.g., Hit@K, MRR, Context Relevance, and Groundedness); and
+          (3)~the generated multiple-choice questions (MCQs) have not yet been evaluated through systematic clinical faculty review or psychometric item analysis to verify clinical accuracy, nuance, and absence of subtle medical hallucinations prior to deployment.
+
     \item \textbf{Absence of Bahasa Indonesia Localization (Monolingual English Pipeline):}
           The offline knowledge extraction and question generation pipelines (utilising HuatuoGPT-o1-72B and Qwen3.5-27B) as well as the client user interface operate exclusively in English. Consequently, the platform cannot directly ingest Indonesian-language medical textbooks or support students who prefer native-language instructional materials and localized clinical terminology.
 
-    \item \textbf{Absence of Multimodal and Visual Question Generation:}
-          Medical education relies heavily on visual comprehension, including anatomical diagrams, histological micrographs, diagnostic imaging, and biochemical pathways. While the ingestion pipeline parses structural headings and textual narratives from source textbooks, non-textual figures are currently stripped during document cleaning. The system is therefore unable to formulate visual questions or multimodal clinical case questions that require interpreting images, charts, and diagrams.
+    \item \textbf{Incomplete End-to-End Multimodal Question Generation:}
+          Medical education relies heavily on visual comprehension, including anatomical diagrams, histological micrographs, diagnostic imaging, and biochemical pathways. Although core multimodal preprocessing modules have been successfully developed---including document figure and layout parsing, vision-language figure captioning, and diagram leader-line detection with OCR-based text label replacement (masking text labels with numbers for anatomical identification)---these processed visual assets have not yet been connected to an automated question generation pipeline. Consequently, the MCQ generation engine currently operates solely on textual semantic triples, and cannot yet formulate visual questions or multimodal clinical case scenarios grounded directly in the processed diagrams and charts.
 
     \item \textbf{Cold-Start Latency in Bayesian Knowledge Tracing (BKT):}
           The student personalization engine leverages Bayesian Knowledge Tracing to infer latent mastery probabilities across granular medical concepts. Because the model relies on historical practice trajectories, newly enrolled students lack sufficient interaction records. As a result, initial mastery estimations default to uncalibrated global priors ($P(L_0)$), leading to suboptimal question recommendations and difficulty matching until a critical mass of formative responses is gathered.
 \end{itemize}
 
-\subsection*{Future Improvements}
+\subsection*{Next Steps}
 
 \begin{itemize}
-    \item \textbf{Multilingual Support \& Indonesian Medical NLP:}
-          Extend the ingestion, knowledge extraction, and MCQ generation pipelines to support Bahasa Indonesia. This includes integrating localized medical terminologies and ontology mappings (such as SNOMED CT Indonesian translations), fine-tuning bilingual extraction prompts, and providing full localization across the iPadOS application interface.
+    \item \textbf{Execute Pilot Testing with Student Cohorts for Knowledge Tracing Calibration:}
+          Deploy the iPadOS application to small cohorts of medical students in controlled pilot trials to validate application usability and stability, while systematically gathering real-world interaction logs (response correctness, latencies, and confidence ratings). This empirical data will serve to calibrate Bayesian Knowledge Tracing (BKT) parameters ($p_{\text{init}}$, $p_{\text{transit}}$, $p_{\text{slip}}$, $p_{\text{guess}}$) and alleviate cold-start prediction latency.
 
-    \item \textbf{Multimodal \& Image-Grounded Question Synthesis:}
-          Incorporate vision-language models (VLMs) alongside document layout parsing to extract, index, and associate high-yield anatomical illustrations and histological slides. This will enable automated generation of visual diagnostic questions, image-label matching tasks, and hot-spot identification flashcards.
+    \item \textbf{Expand Knowledge Graph Coverage Across the Full Medical Curriculum:}
+          Scale the domain knowledge extraction and graph construction pipeline beyond the initial foundational textbooks (physiology, biochemistry, and histology) to encompass the complete preclinical and clinical medical curriculum---incorporating pharmacology, pathology, microbiology, internal medicine, and surgery into unified topic hierarchies and prerequisite dependency networks.
 
-    \item \textbf{Expanded Question Typologies \& Granular Difficulty Calibration:}
-          Introduce a wider variety of question structures, including multi-step clinical reasoning vignettes, case-based scenarios, and assertion-reason questions, while retaining the five-option multiple-choice format. Additionally, incorporate cognitive taxonomy classifiers, such as Bloom's Revised Taxonomy, to enable more precise difficulty calibration and stronger alignment with medical board examination standards.
+    \item \textbf{Establish End-to-End Clinical and Quantitative Benchmark Validation:}
+          Conduct comprehensive expert evaluations with medical educators to audit domain knowledge graphs, quantitatively benchmark GraphRAG retrieval performance (e.g., Hit@K, MRR, and context groundedness), and perform psychometric item analyses on generated MCQs to ensure clinical accuracy.
 
-    \item \textbf{Multi-Signal \& Deep Knowledge Tracing Enhancements:}
-          Enhance the mastery inference framework by transitioning from standard single-parameter BKT toward multi-signal or Deep Knowledge Tracing (DKT) architectures. Incorporating continuous behavioral signals---such as response latency, self-assessed confidence scores, circadian study intervals, and knowledge graph prerequisite traversal---will yield significantly more accurate student models.
+    \item \textbf{Implement Multilingual Support and Indonesian Medical NLP:}
+          Extend the ingestion, knowledge extraction, and MCQ generation pipelines to support Bahasa Indonesia by integrating localized medical terminologies and ontology mappings (such as SNOMED CT Indonesian translations), fine-tuning bilingual extraction prompts, and providing full localization across the iPadOS application interface.
 
-    \item \textbf{Expanded Multi-Format Document Ingestion:}
-          Broaden the preprocessing and OCR ingestion layer beyond textbook PDFs to handle additional institutional formats, including Microsoft Word (.docx) lecture notes, slide presentations (.pptx), clinical practice guidelines, web articles, and scanned paper-based exam archives with formula and tabular data recovery.
+    \item \textbf{Integrate Multimodal and Image-Grounded Question Synthesis:}
+          Connect the existing multimodal preprocessing pipeline (document figure parsing, vision-language captioning, and numbered label masking) directly into the downstream MCQ generation engine and GraphRAG retrieval framework. This will enable automated synthesis of visual diagnostic questions, diagram-label identification tasks, and hot-spot anatomical flashcards.
+
+    \item \textbf{Expand Question Typologies and Calibrate Cognitive Difficulty:}
+          Introduce a wider variety of question structures, including multi-step clinical reasoning vignettes, case-based scenarios, and assertion-reason questions, while retaining the five-option multiple-choice format. Incorporate cognitive taxonomy classifiers (such as Bloom's Revised Taxonomy) to enable more precise difficulty calibration and stronger alignment with medical board examination standards.
+
+    \item \textbf{Upgrade Student Mastery Modeling with Deep Knowledge Tracing:}
+          Enhance the mastery inference framework by transitioning from standard single-parameter BKT toward multi-signal or Deep Knowledge Tracing (DKT) architectures, incorporating continuous behavioral signals---such as response latency, self-assessed confidence scores, circadian study intervals, and knowledge graph prerequisite traversal---to yield significantly more accurate student models.
+
+    \item \textbf{Broaden Ingestion Pipelines Across Multi-Format Academic Documents:}
+          Extend the preprocessing and OCR ingestion layer beyond textbook PDFs to handle additional institutional formats, including Microsoft Word (.docx) lecture notes, slide presentations (.pptx), clinical practice guidelines, web articles, and scanned paper-based exam archives with formula and tabular data recovery.
 \end{itemize}

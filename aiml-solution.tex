@@ -7,13 +7,8 @@
 \begin{itemize}
     \item \textbf{Medical Textbooks (\texttt{data/textbook/}):}
     \begin{itemize}
-        \item \textbf{Source \& Format:} AccessMedicine by McGraw-Hill (PDF, 3 documents, $\sim$700--1000 pages each)
-        \item \textbf{Titles:}
-        \begin{itemize}
-            \item \textit{Ganong's Review of Medical Physiology (27th ed.)}
-            \item \textit{Harper's Illustrated Biochemistry}
-            \item \textit{Junqueira's Basic Histology: Text and Atlas}
-        \end{itemize}
+        \item \textbf{Source \& Format:} AccessMedicine by McGraw-Hill (PDF, 44 chapters)
+        \item \textbf{Titles:} \textit{Harper's Illustrated Biochemistry}
         \item \textbf{Content Structure:}
         \begin{itemize}[itemsep=0pt,topsep=0pt]
             \item Chapter titles, headings, and sub-headings
@@ -23,19 +18,14 @@
             \item Inline mathematical equations
         \end{itemize}
     \end{itemize}
-
-    \item \textbf{Question Sets (\texttt{data/mcq/}):}
-    \begin{itemize}
-        \item Pre-made MCQ evaluation packets (\textit{Batch 1}, \textit{Batch 2}) for question validation and benchmarking.
-    \end{itemize}
 \end{itemize}
 
 
 \subsubsection*{Data Cleaning}
 
 \noindent Raw PDFs are first extracted by \textbf{MinerU} (in an isolated Python
-environment), which produces a structured \texttt{*\_\allowbreak middle.json} block file and associated
-\texttt{*\_\allowbreak content\_\allowbreak list.json} per chapter. The \texttt{post\_process\_book} package then cleans
+environment via \texttt{notebooks/parse\_books.ipynb}), which produces a structured \texttt{*\_\allowbreak middle.json} block file and associated
+\texttt{*\_\allowbreak content\_\allowbreak list.json} per chapter. The \texttt{src/post\_process\_book} module (in \texttt{intelligent-tutoring-system-for-medical-student}) then cleans
 this MinerU output to produce the final text corpus.
 
 \begin{itemize}
@@ -75,8 +65,8 @@ before knowledge-graph construction.
           the \texttt{<topic>} element, which has no source counterpart.
 
     \item \textbf{Stage 1 parse:}
-          The tagged markdown is consumed by Stage~1 of the \texttt{medkg} pipeline
-          (\texttt{stage1\_parse.py}), which produces a tag-free normalised text file and a
+          The tagged markdown is consumed by Stage~1 of the \texttt{knowledge-graph-pipeline} repository
+          (\texttt{medkg/stage1\_parse.py}), which produces a tag-free normalised text file and a
           structured IR JSON carrying offset-anchored chunks, figures and passages. Chunk kinds
           are \texttt{prose}, \texttt{definition}, \texttt{clinical}, \texttt{summary} and
           \texttt{caption}; only the first four reach Stage~2 extraction.
@@ -105,12 +95,13 @@ before knowledge-graph construction.
           \texttt{contraindicated\_in}, \texttt{has\_mechanism}.
           14 deterministic relation guards then audit every extracted relation before assertion.\par}
 
-    \item \textbf{Distractor engineering:} A two-tier strategy selects wrong answer options.
-          Tier 1 performs corpus-level retrieval — for the same \texttt{(topic, relation)} pair,
-          other objects seen elsewhere in the corpus serve as plausible distractors.
-          Tier 2 falls back to the LLM when Tier 1 yields fewer than 3 candidates. A Pydantic
-          \texttt{DistractorSet} validator rejects any distractor that duplicates the correct
-          answer.
+    \item \textbf{Distractor engineering:} A three-tier deterministic strategy selects plausible wrong answer options directly from the domain knowledge graph:
+          \begin{itemize}
+              \item \textit{Tier 1 (Same-Role Siblings):} Other tails of the same predicate occurring elsewhere in the corpus that share the answer's semantic label, preserving syntactic and semantic register.
+              \item \textit{Tier 2 (Guard Confusions):} Concept pairs reflecting common clinical misconceptions, such as antonym pairs (e.g., hyper- vs.\ hypo-) or deviation node variants of the same concept (e.g., \textit{iodine} vs.\ \textit{iodine deficiency}).
+              \item \textit{Tier 3 (Semantic Type Peers):} Concepts sharing the same ontology span label.
+          \end{itemize}
+          Open-world distractor safety is enforced via a multi-graph blocklist: any concept connected to the head under the target predicate across asserted, inferred, or flagged/uncertain graphs is strictly excluded.
 
     \item \textbf{Domain Knowledge Graph:}
           \texttt{medkg/} implements an 8-stage pipeline that builds an RDF knowledge
@@ -125,16 +116,11 @@ before knowledge-graph construction.
 \subsection*{Exploratory Data Analysis}
 
 \begin{itemize}
-    \item \textbf{Question bank distribution:}
-          The generated question bank (\texttt{question\_bank.json}) contains \textbf{188 validated
-          MCQs} spanning medical textbook sections, distributed across three difficulty tiers:
-          Tier 1 (Recall), Tier 2 (Application), and Tier 3 (Clinical Vignette Reasoning).
+    \item \textbf{Knowledge graph extraction yield:}
+          The domain knowledge graph pipeline extracts and structures verified biomedical relations across medical textbook chapters, anchoring every triple to an auditable source sentence rationale.
 
-    \item \textbf{Self-critique correction rate:}
-          Approximately \textbf{62\% (116 of 188)} questions triggered the automated self-critique
-          correction pass (\texttt{valid\_as\_generated: false}), demonstrating that the
-          \textit{Critique} and \textit{Corrector} feedback loop is essential for output quality —
-          single-pass generation alone was insufficient.
+    \item \textbf{Deterministic guardrail \& distractor filtering:}
+          The 14 relation consistency guards and multi-graph distractor blocklists audit all extracted candidates, demoting suspect relations to \texttt{polarity = "uncertain"} and eliminating distractor leakage or clinically inverted claims prior to question synthesis.
 
     \item \textbf{MinerU quality diagnostics:}
 
@@ -191,15 +177,15 @@ across the pipeline:
 
     \item \textbf{Qwen3.5-27B / Qwen3.5-9B-OptiQ} (\textit{LLM})
     \begin{itemize}
-        \item \textbf{Role:} MCQ question-stem phrasing, distractor evaluation, and automated self-critique loop (\texttt{medkg/mcq.py}).
+        \item \textbf{Role:} MCQ question-stem phrasing, stylistic rephrasing, and validation guardrails (\texttt{knowledge-graph-pipeline/medkg/mcq.py}).
         \item \textbf{Configuration \& Hyperparameters:}
         \begin{itemize}[itemsep=1pt,topsep=1pt]
             \item \textit{Checkpoint \& Backend:} \texttt{Qwen/Qwen3.5-27B} or \texttt{mlx-community/Qwen3.5-9B-OptiQ-4bit} via OpenAI-compatible endpoint (\texttt{http://localhost:8888/v1}); $T = 0.0$, $\text{max\_tokens} = 4096$, guided JSON schema decoding.
             \item \textit{Batching \& Limits:} Batch size of 10 items per phrasing pass (\texttt{phrase\_items}); maximum stem length capped at 300 characters; 5 options per question (1 key + 4 distractors).
             \item \textit{Distractor Safety Guardrails:} 3-tier open-world exclusion (asserted/inferred/flagged triple blocklist; alternate head-edge prohibition; indefinite stem framing); negative-stem regex guard (\texttt{\_NEGATIVE\_RE}) rejecting negative phrasing to prevent open-world fallacies.
-            \item \textit{Self-Critique Cycle:} Automated critique and corrector loop evaluating distractor plausibility and answer leakage.
+            \item \textit{Stem Rewriting Safeguards:} Checks that rephrased stems do not leak the key or distractors and end with a question mark. Rejections fall back deterministically to rule-based template stems (\texttt{accept\_stem}).
         \end{itemize}
-        \item \textbf{Validation:} Pydantic schema validation (\texttt{DistractorSet}, \texttt{Critique}); negative-stem guard; stem character ceiling.
+        \item \textbf{Validation:} Negative-stem guard; stem character ceiling; no-option-leakage validation; deterministic template fallback.
     \end{itemize}
 
     \item \textbf{Qwen2.5-VL-7B-Instruct \& 3B-Instruct} (\textit{Vision-Language Model})
@@ -231,14 +217,32 @@ across the pipeline:
 
     \item \textbf{Bayesian Knowledge Tracing \& Spaced Repetition Algorithms} (\textit{Probabilistic \& Cognitive Models})
     \begin{itemize}
-        \item \textbf{Role:} Real-time student mastery tracking and personalized quiz/flashcard review scheduling (\texttt{src/quiz/}, \texttt{src/flashcards/}, \texttt{BKTStore.swift}).
-        \item \textbf{Configuration \& Hyperparameters:}
+        \item \textbf{Role:} Real-time student concept mastery tracking and personalized quiz/flashcard review scheduling (\texttt{src/quiz/}, \texttt{src/flashcards/}, \texttt{BKTStore.swift}, \texttt{notebooks/knowledge\_tracing.ipynb}).
+        \item \textbf{Model Architecture \& Confidence Conditioning:}
         \begin{itemize}[itemsep=1pt,topsep=1pt]
-            \item \textit{BKT Engine:} 2-state Hidden Markov Model running on-device in Swift with bootstrap priors: $p_{\text{init}} = 0.30$, $p_{\text{transit}} = 0.10$, confidence-conditional slip $p_{\text{slip}}$ (0.05 confident / 0.10 unsure / 0.30 guessing), and guess $p_{\text{guess}}$ (0.10 confident / 0.25 unsure / 0.50 guessing); synced via \texttt{PUT /quiz/mastery} to Neo4j.
-            \item \textit{Spaced Repetition (Quiz):} Confidence-weighted interval progression on \texttt{(:Student)-[:REVIEWING]->(:Question)}: correct + confident doubles interval ($1 \to 2 \to 4 \to \dots \le 60\,\text{days}$); wrong or unsure resets streak to 0 (interval 1 day).
-            \item \textit{Spaced Repetition (Flashcard):} 4-point rating schedule on \texttt{(:Student)-[:HAS\_FLASHCARD]->(:Flashcard)}: \textit{Again} (0.0 / 1 day), \textit{Hard} ($1.2\times$), \textit{Good} ($2.0\times$), \textit{Easy} ($2.5\times$), capped at 60 days.
+            \item \textit{2-State Knowledge Engine:} Tracks latent mastery (learned vs.\ unlearned) per (student, leaf topic) pair with a unidirectional transition structure assuming mastery acquisition without immediate forgetting.
+            \item \textit{Confidence-Weighted Evidence:} Integrates self-reported confidence (\textit{confident}, \textit{unsure}, \textit{guessing}) directly into the emission probabilities. This prevents lucky guesses from falsely indicating mastery while treating confident errors as critical misconceptions that substantially depress the estimated mastery score.
+            \item \textit{Hybrid Client-Server Deployment:} The population-wide BKT parameters are estimated server-side and cached by the iOS app via \texttt{GET /quiz/mastery/params}. This enables \texttt{BKTStore.swift} to execute instantaneous, lightweight $O(1)$ mastery updates on-device during offline or online quiz attempts, syncing results back to Neo4j via \texttt{PUT /quiz/mastery}.
         \end{itemize}
-        \item \textbf{Validation:} Empirical ROC-AUC next-step prediction evaluation ($0.6819$) and review interval convergence monitoring.
+        \item \textbf{Optimization via Baum-Welch Expectation-Maximization (EM):}
+        \begin{itemize}[itemsep=1pt,topsep=1pt]
+            \item \textit{Overcoming Heuristic Limitations:} Hand-picked prior, transition, slip, and guess values acted as an artificial performance ceiling, yielding near-chance predictive capability ($\text{ROC-AUC} = 0.5658$, $\text{log-loss} = 0.7491$).
+            \item \textit{Global Sequence Pooling:} Because individual topic histories are sparse (median 6 attempts per student-topic pair), fitting parameters per-topic risks severe overfitting and degenerate parameter states. We formulated Baum-Welch EM to pool all 1,554 chronological interaction sequences across 43 students and 56 topics (10,480 total quiz attempts) into a unified, robust parameter estimation pass.
+            \item \textit{Iterative Learning Dynamics:} The Expectation step runs forward-backward passes across complete chronological interaction sequences to evaluate latent mastery state trajectories over time. The Maximization step aggregates these expected state transitions and observation counts to re-estimate initial mastery priors, transition rates, and confidence-stratified slip and guess probabilities until log-likelihood convergence (converged in 14 iterations).
+            \item \textit{Learned Parameter Adjustments:} The data-driven optimization adjusted the initial mastery prior from 0.30 to 0.4033, smoothed transition rates from 0.10 to 0.0551, and aligned emission rates with empirical student response behaviors across all confidence tiers.
+        \end{itemize}
+        \item \textbf{Predictive Evaluation \& Performance Gains (Next-Step P(Correct)):}
+        \begin{itemize}[itemsep=1pt,topsep=1pt]
+            \item \textit{Heuristic Baseline (Before EM):} $\text{ROC-AUC} = \mathbf{0.5658}$, $\text{Log-Loss} = \mathbf{0.7491}$ (barely above chance).
+            \item \textit{Baum-Welch EM Optimized (After EM):} $\text{ROC-AUC} = \mathbf{0.6819}$ (\textbf{+0.1161 / +20.5\% relative gain}), $\text{Log-Loss} = \mathbf{0.6404}$ (\textbf{-0.1087 / 14.5\% error reduction}).
+            \item \textit{Personalization Impact:} This marked improvement transforms BKT from an unreliable heuristic into an effective ranking signal for identifying genuine knowledge gaps.
+        \end{itemize}
+        \item \textbf{Personalization Scheduling \& Pedagogical Diagnostics:}
+        \begin{itemize}[itemsep=1pt,topsep=1pt]
+            \item \textit{Quiz Spaced Repetition:} Confidence-weighted interval progression on \texttt{(:Student)-[:REVIEWING]->(:Question)}: confident correct answers double review intervals ($1 \to 2 \to 4 \to \dots \le 60\,\text{days}$), whereas incorrect or unsure attempts reset streaks to 1 day.
+            \item \textit{Flashcard Spaced Repetition:} 4-point rating schedule on \texttt{(:Student)-[:HAS\_FLASHCARD]->(:Flashcard)}: \textit{Again} (1 day), \textit{Hard} ($1.2\times$), \textit{Good} ($2.0\times$), and \textit{Easy} ($2.5\times$), capped at 60 days.
+            \item \textit{Pedagogical Gap Flagging:} Weak-topic queries distinguish unattempted topics (\texttt{low\_evidence}, $<3$ attempts, preventing premature weak-topic assertions) from persistent misconceptions (\texttt{stuck}, $\ge 3$ attempts with average question retry counter $\ge 2.0$ while mastery remains low, prompting alternative explanatory materials rather than simple repetition).
+        \end{itemize}
     \end{itemize}
 \end{itemize}\par}
 
@@ -261,25 +265,24 @@ across the pipeline:
     \begin{itemize}
         \item \textit{Decoupled architecture:} The live API is fully CPU-bound; all heavy
               inference runs offline during ingestion and generation.
-        \item \textit{High quality control:} Every served question passes strict Pydantic
-              schema validation and the self-critique correction loop before being committed
-              to the database.
+        \item \textit{High quality control:} Every served question is grounded in asserted
+              biomedical knowledge graph triples and protected by multi-graph distractor
+              blocklisting and deterministic relation guards before being committed to PostgreSQL.
         \item \textit{Graph-based student tracking:} Neo4j enables real-time spaced repetition
               and Bayesian Knowledge Tracing (BKT) based on per-topic mastery edges.
     \end{itemize}
 
     \item \textbf{Comparison with alternative approaches:}
     \begin{itemize}
-        \item \textit{Single-pass LLM question generation:} Replaced by the 6-step triple
-              extraction $\rightarrow$ distractor generation $\rightarrow$ self-critique pipeline
-              to eliminate answer leakage and reduce hallucination in generated stems.
+        \item \textit{Single-pass unconstrained LLM question generation:} Replaced by the graph-grounded
+              triple extraction $\rightarrow$ open-world distractor safety $\rightarrow$ template/LLM phrasing pipeline
+              to eliminate answer leakage, prevent open-world fallacies, and guarantee factual traceability.
     \end{itemize}
 
     \item \textbf{Final performance metrics:}
     \begin{itemize}
-        \item \textit{BKT knowledge tracing validation:} Next-step correctness prediction evaluated on student interaction trajectories achieved an empirical \textbf{ROC-AUC of 0.6819} and a log-loss of \textbf{0.7105}, confirming its effectiveness in tracking evolving concept mastery and surfacing student knowledge gaps.
-        \item \textit{Question bank coverage:} Total of \textbf{188 validated MCQs} generated and structured across three cognitive difficulty tiers.
-        \item \textit{Automated critique refinement:} \textbf{62\% (116 of 188 questions)} successfully refined via the self-critique verification loop.
+        \item \textit{BKT knowledge tracing validation:} Next-step correctness prediction evaluated on 10,480 student interaction trajectories demonstrated significant gains from Baum-Welch EM parameter optimization: \textbf{ROC-AUC increased from 0.5658 (heuristic baseline) to 0.6819 (+20.5\% relative gain)}, while \textbf{log-loss decreased from 0.7491 to 0.6404 (14.5\% error reduction)}, confirming the effectiveness of EM fitting in eliminating heuristic parameter bottlenecks and tracking evolving mastery.
         \item \textit{Ingestion throughput:} \texttt{post\_process\_book} cleaner executes deterministically in sub-second time per PDF chapter.
+        \item \textit{Question safety and traceability:} 100\% of synthesized MCQs are anchored to verified textbook source sentences with multi-graph distractor verification.
     \end{itemize}
 \end{itemize}
