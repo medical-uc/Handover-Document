@@ -23,10 +23,12 @@
 
 \subsubsection*{Data Cleaning}
 
+\begin{sloppypar}
 \noindent Raw PDFs are first extracted by \textbf{MinerU} (in an isolated Python
-environment via \texttt{notebooks/parse\_books.ipynb}), which produces a structured \texttt{*\_\allowbreak middle.json} block file and associated
-\texttt{*\_\allowbreak content\_\allowbreak list.json} per chapter. The \texttt{src/post\_process\_book} module (in \texttt{intelligent-tutoring-system-for-medical-student}) then cleans
+environment via \texttt{notebooks/\allowbreak parse\_books.ipynb}), which produces a structured \texttt{*\_\allowbreak middle.json} block file and associated
+\texttt{*\_\allowbreak content\_\allowbreak list.json} per chapter. The \texttt{src/\allowbreak post\_\allowbreak process\_\allowbreak book} module (in \texttt{intelligent-tutoring-system-\allowbreak for-medical-student}) then cleans
 this MinerU output to produce the final text corpus.
+\end{sloppypar}
 
 \begin{itemize}
     \item Removing irrelevant content blocks: image blocks, running headers/footers, page numbers,
@@ -65,7 +67,7 @@ before knowledge-graph construction.
           the \texttt{<topic>} element, which has no source counterpart.
 
     \item \textbf{Stage 1 parse:}
-          The tagged markdown is consumed by Stage~1 of the \texttt{knowledge-graph-pipeline} repository
+          The tagged markdown is consumed by Stage~1 of the \texttt{knowledge-graph-\allowbreak pipeline} repository
           (\texttt{medkg/stage1\_parse.py}), which produces a tag-free normalised text file and a
           structured IR JSON carrying offset-anchored chunks, figures and passages. Chunk kinds
           are \texttt{prose}, \texttt{definition}, \texttt{clinical}, \texttt{summary} and

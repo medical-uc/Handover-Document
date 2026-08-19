@@ -17,6 +17,7 @@ persisted storage contracts:
 
 \begin{itemize}
     \item \textbf{The Offline Content \& Knowledge Pipeline (Heavy AI/ML):}
+    \begin{sloppypar}
     \begin{itemize}
         \item Ingests raw textbook PDFs via MinerU and cleans extraction outputs via \texttt{post\_process\_book}.
         \item Formats faithful structurally tagged markdown via \texttt{document-rewriter} (HuatuoGPT-o1-72B).
@@ -25,6 +26,7 @@ persisted storage contracts:
         \item Requires CUDA/MPS GPU hardware, PyTorch, Transformers, FAISS, and isolated Python runtimes.
         \item Produces clean, validated relational tables in PostgreSQL (\texttt{mcq\_questions}) and semantic RDF graphs (\texttt{graph.nq}).
     \end{itemize}
+    \end{sloppypar}
 
     \item \textbf{The Live Serving Layer (FastAPI + iPadOS):}
     \begin{itemize}
@@ -43,7 +45,7 @@ persisted storage contracts:
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=\linewidth]{images/mermaid_arch_highlevel.pdf}
+    \includegraphics[width=\linewidth]{images/flowcharts/mermaid_arch_highlevel.pdf}
     \caption{Full component decomposition: Client Tier, HTTP Network Boundary, Backend Tier,
              Domain Service Tier, and Persistence Infrastructure.}
 \end{figure}
@@ -99,7 +101,7 @@ graph data.
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=\linewidth]{images/mermaid_graph_schema.pdf}
+    \includegraphics[width=\linewidth]{images/flowcharts/mermaid_graph_schema.pdf}
     \caption{Neo4j Student Knowledge Graph Schema: nodes, relationships, and property contracts.}
 \end{figure}
 
@@ -125,7 +127,7 @@ Key graph design rules:
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.92\linewidth]{images/mermaid_auth_flow.pdf}
+    \includegraphics[width=0.92\linewidth]{images/flowcharts/mermaid_auth_flow.pdf}
     \caption{Opaque Bearer Token authentication sequence: registration/login flow and
              authenticated API invocation with \texttt{SessionAuthMiddleware}.}
 \end{figure}
@@ -151,7 +153,7 @@ The application architecture coordinates three decoupled subsystems spanning off
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=\linewidth]{images/mermaid_e2e_flow.pdf}
+    \includegraphics[width=\linewidth]{images/flowcharts/mermaid_e2e_flow.pdf}
     \caption{Complete system dataflow across the three subsystems: Offline Content Ingestion,
              BKT Parameter Training, and Live Student Learning Interaction.}
 \end{figure}
@@ -160,36 +162,112 @@ The application architecture coordinates three decoupled subsystems spanning off
 
 The iPadOS client manages student identity through an opaque Bearer token architecture:
 
+\begin{sloppypar}
 \begin{enumerate}
     \item \textbf{Registration \& Login:} The student submits credentials via \texttt{POST /students/login} or \texttt{POST /students/register}. The backend matches or creates the \texttt{:Student} node in Neo4j, mints a 32-byte cryptographic token (\texttt{secrets.token\_urlsafe(32)}), computes its SHA-256 hash, and stores a \texttt{:Session} node with a 30-day expiration timestamp (\texttt{expires\_at}).
     \item \textbf{Secure Client Storage:} The raw token is returned to iPadOS and stored in \texttt{KeychainStore} using the Apple Security framework, while \texttt{SessionManager} publishes the active authentication state.
     \item \textbf{Middleware Verification:} Subsequent HTTP requests provide the token via the \texttt{Authorization:}\allowbreak\ \texttt{Bearer <token>} header. \texttt{SessionAuthMiddleware} intercepts requests, computes the SHA-256 hash, and performs a single Cypher lookup against Neo4j to confirm the session is unrevoked and unexpired, injecting \texttt{student\_id} into \texttt{request.state}.
 \end{enumerate}
+\end{sloppypar}
 
 \subsubsection*{Flow 3: Quiz Execution, Grading \& Mastery Sync}
 
-The quiz lifecycle operates across four sequential phases designed to deliver instant feedback while guaranteeing asynchronous persistence:
+The quiz lifecycle operates across four sequential phases designed to deliver instant feedback while guaranteeing asynchronous persistence (illustrated in Figure~\ref{fig:quiz_flow_screens}):
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/application/quiz_choose_topic.jpeg}
+        \caption{Multi-Topic Selection}
+        \label{fig:quiz_choose_topic}
+    \end{subfigure}\hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/application/quiz_preview.jpeg}
+        \caption{Adaptive Quiz Preview}
+        \label{fig:quiz_preview}
+    \end{subfigure}\\[1em]
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/application/quiz_question.jpeg}
+        \caption{Metacognitive Question Grading}
+        \label{fig:quiz_question}
+    \end{subfigure}
+    \caption{Interactive Quiz Execution Lifecycle: (a) Multi-topic selection interface with real-time question counters, (b) Weakness-weighted quiz preview showing adaptive distribution across topics, and (c) Live question interface displaying instant option evaluation, 3-tier metacognitive confidence rating, and citation-grounded clinical explanation.}
+    \label{fig:quiz_flow_screens}
+\end{figure}
 
 \begin{enumerate}
-    \item \textbf{Option Selection \& Instant Grading:} The student selects an answer option and confidence level (\textit{Confident / Unsure / Guessing}). \texttt{POST /quiz/questions/\{uid\}/check} is a public, stateless endpoint that evaluates the option against an in-memory sanitized question bank---returning \texttt{correct}, \texttt{correct\_index}, and clinical \texttt{explanation} in sub-15\,ms.
-    \item \textbf{On-Device BKT Update:} \texttt{BKTStore.record()} computes the Bayesian posterior mastery $p_{\text{know}}$ using confidence-stratified slip and guess probabilities. The updated estimate is written to local \texttt{UserDefaults} and synchronised to Neo4j via an asynchronous background \texttt{PUT /quiz/mastery} call.
-    \item \textbf{Stateful Log Commit:} When navigating to the next question, the client issues an authenticated \texttt{POST /quiz/questions/\{uid\}/log} request. The backend commits an immutable \texttt{:QUIZ\_ANSWER} event linked to the active \texttt{:QuizSession} and updates the spaced-repetition schedule on the \texttt{(Student)-[:REVIEWING]->(Question)} edge.
+    \item \textbf{Topic Configuration \& Adaptive Weighting (Figure~\ref{fig:quiz_choose_topic}, \ref{fig:quiz_preview}):} The student selects up to three medical topics via \texttt{GET /quiz/topics}. When creating the session (\texttt{POST /quiz/topics/\{path\}/sessions}), the quiz builder generates a test set (e.g., 10 questions) with topic distribution weighted inversely proportional to the student's current Bayesian mastery estimate ($\propto 1 - p_{\text{know}}$), ensuring focused remediation on weak areas. Students can toggle \textit{Review Mode} to receive immediate explanatory feedback after each item.
+    \item \textbf{Option Selection \& Instant Grading (Figure~\ref{fig:quiz_question}):} The student selects an answer option and self-reports a metacognitive confidence level (\textit{Confident / Unsure / Guessing}). \texttt{POST /quiz/questions/\{uid\}/check} is a public, stateless endpoint that evaluates the option against an in-memory sanitized question bank---returning \texttt{correct}, \texttt{correct\_index}, and a verified clinical \texttt{explanation} with textbook section provenance in sub-15\,ms. Correct and incorrect choices are immediately color-coded in the UI (green checkmark vs.\ red cross).
+    \item \textbf{On-Device BKT Update:} Immediately upon evaluation, \texttt{BKTStore.record()} on iPadOS computes the updated Bayesian posterior mastery $p_{\text{know}}$ using confidence-stratified slip and guess probabilities ($p_{\text{slip}}[c], p_{\text{guess}}[c]$). The updated estimate is written synchronously to local \texttt{UserDefaults} and dispatched asynchronously to Neo4j via a background \texttt{PUT /quiz/mastery} request.
+    \item \textbf{Stateful Log Commit \& Spaced Repetition:} When advancing to the next question, the client issues an authenticated \texttt{POST /quiz/questions/\{uid\}/log} request. The backend commits an immutable \texttt{:QUIZ\_ANSWER} event linked to the active \texttt{:QuizSession} and updates the spaced-repetition schedule on the \texttt{(Student)-[:REVIEWING]->(Question)} edge.
     \item \textbf{Quiz Completion \& Gamification:} \texttt{POST /quiz/sessions/\{id\}/end} finalises the session, aggregates score metrics, updates the student's daily activity streak, and awards $+5$ Energy currency in Neo4j.
 \end{enumerate}
 
 \subsubsection*{Flow 4: Flashcard Spaced Repetition Lifecycle}
 
-Flashcard study sessions employ a modified SuperMemo spaced repetition algorithm tailored to student knowledge state:
+Flashcard study sessions employ a modified SuperMemo spaced repetition algorithm tailored to student knowledge state (illustrated in Figure~\ref{fig:flashcard_flow_screens}):
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/application/flashcard_choose_topic.jpeg}
+        \caption{Weakness-Prioritized Setup}
+        \label{fig:flashcard_choose_topic}
+    \end{subfigure}\\[1em]
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/application/flashcard_front.jpeg}
+        \caption{Active Recall Prompt Front}
+        \label{fig:flashcard_front}
+    \end{subfigure}\hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/application/flashcard_back.jpeg}
+        \caption{Answer Reveal \& Rating Back}
+        \label{fig:flashcard_back}
+    \end{subfigure}
+    \caption{Flashcard Spaced Repetition Lifecycle: (a) Session configuration with ``Study Everything Due'' and targeted weak-topic recommendations, (b) Card front prompt displaying deck progress and navigation controls, and (c) Card back showing revealed clinical explanation, animated $+2$ Energy reward, and 4-tier SuperMemo recall rating buttons.}
+    \label{fig:flashcard_flow_screens}
+\end{figure}
 
 \begin{enumerate}
-    \item \textbf{Deck Assembly \& Weakness Prioritisation:} When initiating a session via \texttt{POST /flashcards/sessions}, the backend queries due cards where $\texttt{next\_review\_at} \le \text{now}$. Any remaining slots in the batch are dynamically filled with cards corresponding to the student's lowest BKT mastery topics ($p_{\text{know}}$).
-    \item \textbf{Card Front \& Answer Reveal:} The client presents the question stem and prompt. Tapping ``Reveal Answer'' dispatches \texttt{POST /flashcards/cards/\{uid\}/reveal} to retrieve the detailed answer back and explanation.
-    \item \textbf{Recall Rating \& Interval Update:} The student evaluates recall quality on a 4-point scale (\textit{Again, Hard, Good, Easy}). \texttt{POST /flashcards/cards/\{uid\}/log} records a \texttt{:FLASHCARD\_REVIEW} node, recalculates interval days and repetition streaks on the \texttt{:Flashcard} node, awards $+1$ Energy, and returns the next review date.
+    \item \textbf{Deck Assembly \& Weakness Infill (Figure~\ref{fig:flashcard_choose_topic}):} When initiating a session via \texttt{POST /flashcards/sessions}, the backend first queries due cards where $\texttt{next\_review\_at} \le \text{now}$. Any remaining slots in the batch are dynamically infilled with flashcards corresponding to topics where the student exhibits low BKT mastery ($p_{\text{know}}$), surfaced under \textit{Recommended for You} with ``Needs Work'' status tags.
+    \item \textbf{Active Recall Card Front (Figure~\ref{fig:flashcard_front}):} The client presents the question stem and prompt derived from triple synthesis, displaying current deck progress (e.g., Biochemistry Essentials, 63\% progress) alongside deck navigation tools.
+    \item \textbf{Card Back Reveal \& Energy Reward (Figure~\ref{fig:flashcard_back}):} Tapping ``Tap to flip the card'' or ``Reveal Answer'' dispatches \texttt{POST /flashcards/cards/\{uid\}/reveal} to retrieve the full clinical answer text and explanation. An immediate visual reward animation awards $+2$ Energy points to the student's live balance.
+    \item \textbf{Recall Rating \& Interval Update (Figure~\ref{fig:flashcard_back}):} The student self-evaluates memory recall on a 4-point scale (\textit{Again, Hard, Good, Easy}). \texttt{POST /flashcards/cards/\{uid\}/log} records an immutable \texttt{:FLASHCARD\_REVIEW} node in Neo4j, recalculates interval days and repetition streaks on the \texttt{:Flashcard} node according to the SuperMemo multiplier rules, and commits the next review timestamp.
 \end{enumerate}
 
 \subsubsection*{Flow 5: Adaptive Knowledge Tracing \& Personalization Loop}
 
-The personalization engine implements a closed-loop hybrid architecture combining server-side population fitting with client-side real-time state tracking:
+The personalization engine implements a closed-loop hybrid architecture combining server-side population fitting with client-side real-time state tracking (illustrated in Figure~\ref{fig:mastery_flow_screens}):
+
+\begin{figure}[htbp]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/application/subjects.jpeg}
+        \caption{Curriculum Subjects Browser}
+        \label{fig:subjects_view}
+    \end{subfigure}\hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/application/subject_detail.jpeg}
+        \caption{Hierarchical Topic Breakdown}
+        \label{fig:subject_detail_view}
+    \end{subfigure}\\[1em]
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{images/application/topic_breakdown.jpeg}
+        \caption{Explainable BKT Diagnostic}
+        \label{fig:topic_breakdown_view}
+    \end{subfigure}
+    \caption{Curriculum Navigation and Explainable Bayesian Mastery: (a) Subject overview browser displaying aggregate topic mastery percentages, (b) Subject detail view rendering subtopic mastery status badges, and (c) Explainable AI (XAI) diagnostic modal detailing confidence discounting, recent attempt trajectory, and Bayesian posterior updating.}
+    \label{fig:mastery_flow_screens}
+\end{figure}
 
 \begin{enumerate}
     \item \textbf{Server-Side Population Parameter Fitting (Periodic Batch):} Interaction sequences are extracted from pooled \texttt{:QUIZ\_ANSWER} nodes in Neo4j. The Baum-Welch EM script (\texttt{src/quiz/bkt\_fit.py}) executes Forward-Backward rescaling (E-step) and expectation maximisation (M-step) to derive global parameters: $p_{\text{init}}$, $p_{\text{transit}}$, and confidence-conditioned $p_{\text{slip}}(c)$ and $p_{\text{guess}}(c)$. Fitted parameters are cached and exposed via \texttt{GET /quiz/mastery/params}.
@@ -198,17 +276,19 @@ The personalization engine implements a closed-loop hybrid architecture combinin
         p(L_t \mid y_t, c) = \frac{p(L_{t-1}) \cdot P(y_t \mid L_t, c)}{P(y_t \mid c)}
     \end{equation}
     and applies the transition prior $p(L_{t+1}) = p(L_t \mid y_t, c) + (1 - p(L_t \mid y_t, c)) p_{\text{transit}}$. The resulting $p_{\text{know}}$ is stored in local storage and dispatched asynchronously to Neo4j via \texttt{PUT /quiz/mastery}.
+    \item \textbf{Curriculum Mastery Navigation (Figure~\ref{fig:subjects_view}, \ref{fig:subject_detail_view}):} In \texttt{SubjectsView}, individual topic masteries are aggregated across medical subject modules (e.g., \textit{Amino Acids \& Peptides (34\%)}, \textit{Biosynthesis of Fatty Acids (42\%)}). In \texttt{SubjectDetailView}, fine-grained subtopics display item counts and state labels (\textit{Needs Work}, \textit{Review Due}, \textit{Mastered}) based on thresholded $p_{\text{know}}$ values.
+    \item \textbf{Explainable AI (XAI) Diagnostic Modal (Figure~\ref{fig:topic_breakdown_view}):} To demystify the machine learning model for learners, tapping the info badge opens the \textit{Topic Breakdown} modal. This interface explains how the mastery level is calculated, illustrates recent attempt trajectories (e.g., \textit{Correct · Unsure · $+7\%$}), and explains why guessing is discounted: \textit{``Recent attempts suggest this isn't solid yet. This score already discounts lucky guesses, so it reflects real gaps---a good candidate for focused practice.''}
     \item \textbf{Downstream Personalization Delivery:}
     \begin{itemize}[leftmargin=*]
         \item \textit{Weighted Quiz Selection:} Multi-topic quizzes sample questions with weights inversely proportional to topic mastery ($\propto 1 - p_{\text{know}}$).
         \item \textit{Flashcard Weak-Topic Infill:} Practice decks prioritize review cards from topics exhibiting the lowest mastery scores.
-        \item \textit{Adaptive Nudges \& Progress:} The backend \texttt{GET /students/me/nudge} endpoint inspects \texttt{:MASTERS} edges to surface high-priority study recommendations on the dashboard, while \texttt{SubjectsView} renders real-time topic progress bars.
+        \item \textit{Adaptive Nudges \& Progress:} The backend \texttt{GET /students/me/nudge} endpoint inspects \texttt{:MASTERS} edges to surface high-priority study recommendations on the dashboard.
     \end{itemize}
 \end{enumerate}
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=\linewidth,height=0.82\textheight,keepaspectratio]{images/mermaid_bkt_personalization.pdf}
+    \includegraphics[width=\linewidth,height=0.82\textheight,keepaspectratio]{images/flowcharts/mermaid_bkt_personalization.pdf}
     \caption{Hybrid BKT personalization loop: server-side Baum-Welch EM parameter fitting
              and client-side real-time knowledge tracing on iPadOS.}
 \end{figure}
@@ -217,17 +297,19 @@ The personalization engine implements a closed-loop hybrid architecture combinin
 
 The offline ingestion pipeline converts unstructured medical textbooks into formal knowledge graphs and verified multiple-choice questions across five sequential stages:
 
+\begin{sloppypar}
 \begin{enumerate}
-    \item \textbf{Stage 1: Parsing \& Extraction:} The MinerU CLI and notebook (\texttt{notebooks/parse\_books.ipynb}) process raw textbook PDFs to extract layout bounding boxes (\texttt{\_middle.json}), content streams (\texttt{\_content\_list.json}), and embedded anatomical figures.
-    \item \textbf{Stage 2: Deterministic Book Cleaning (\texttt{src/post\_process\_book}):} Cleans MinerU output by stripping image blocks, headers/footers, and publisher citation parentheticals while preserving paragraph body text, list structures, tables, mathematical formulas, and inline figure mentions. Outputs \texttt{<chapter>.cleaned.md} and \texttt{<chapter>.page\_map.json}.
+    \item \textbf{Stage 1: Parsing \& Extraction:} The MinerU CLI and notebook (\texttt{notebooks/\allowbreak parse\_books.ipynb}) process raw textbook PDFs to extract layout bounding boxes (\texttt{\_middle.json}), content streams (\texttt{\_content\_list.json}), and embedded anatomical figures.
+    \item \textbf{Stage 2: Deterministic Book Cleaning (\texttt{src/\allowbreak post\_process\_book}):} Cleans MinerU output by stripping image blocks, headers/footers, and publisher citation parentheticals while preserving paragraph body text, list structures, tables, mathematical formulas, and inline figure mentions. Outputs \texttt{<chapter>.cleaned.md} and \texttt{<chapter>.page\_map.json}.
     \item \textbf{Stage 3: Structural Document Rewriting (\texttt{document-rewriter}):} Under strict faithfulness constraints, carries over textbook prose verbatim into structured XML-like study markdown (\texttt{<doc>}, \texttt{<con>}, \texttt{<fig>}, \texttt{<tbl>}), resolving in-document cross-references into \texttt{<figref>}/\texttt{<tblref>} and calling HuatuoGPT-o1-72B exclusively for the document \texttt{<topic>} line.
-    \item \textbf{Stage 4: Domain Knowledge Graph Construction (\texttt{knowledge-graph-pipeline}):} The 8-stage \texttt{medkg} engine executes scispaCy NER, SapBERT entity linking with UMLS semantic type label correction, HuatuoGPT-o1-72B relation and modifier extraction, 14 deterministic relation guards, post-coordination modifier minting, RDF quad assertion, and OWL-RL reasoning.
-    \item \textbf{Stage 5: Graph-Grounded MCQ Generation \& Database Population (\texttt{medkg/mcq.py}):} Synthesizes single-best-answer MCQs directly from asserted semantic triples across 13 core clinical predicate templates. Enforces 3-tier distractor ranking with open-world multi-graph blocklisting and batch LLM stem phrasing (\texttt{phrase\_items}) with deterministic template fallback. Validated questions are committed to PostgreSQL (\texttt{mcq\_questions}).
+    \item \textbf{Stage 4: Domain Knowledge Graph Construction (\texttt{knowledge-graph-\allowbreak pipeline}):} The 8-stage \texttt{medkg} engine executes scispaCy NER, SapBERT entity linking with UMLS semantic type label correction, HuatuoGPT-o1-72B relation and modifier extraction, 14 deterministic relation guards, post-coordination modifier minting, RDF quad assertion, and OWL-RL reasoning.
+    \item \textbf{Stage 5: Graph-Grounded MCQ Generation \& Database Population (\texttt{medkg/\allowbreak mcq.py}):} Synthesizes single-best-answer MCQs directly from asserted semantic triples across 13 core clinical predicate templates. Enforces 3-tier distractor ranking with open-world multi-graph blocklisting and batch LLM stem phrasing (\texttt{phrase\_items}) with deterministic template fallback. Validated questions are committed to PostgreSQL (\texttt{mcq\_questions}).
 \end{enumerate}
+\end{sloppypar}
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=\linewidth,height=0.82\textheight,keepaspectratio]{images/mermaid_ingestion_pipeline.pdf}
+    \includegraphics[width=\linewidth,height=0.82\textheight,keepaspectratio]{images/flowcharts/mermaid_ingestion_pipeline.pdf}
     \caption{5-stage offline ingestion pipeline: PDF parsing, deterministic cleaning,
              structural document rewriting, domain KG construction, and graph-grounded MCQ generation.}
 \end{figure}
@@ -236,6 +318,7 @@ The offline ingestion pipeline converts unstructured medical textbooks into form
 
 The domain knowledge graph pipeline constructs a formal, ontology-grounded biomedical semantic graph across eight stages:
 
+\begin{sloppypar}
 \begin{enumerate}
     \item \textbf{Stage 1 (Parse):} Ingests semantically tagged Markdown containing clinical inline annotations (\texttt{<con>}, \texttt{<def>}, \texttt{<clin>}), validating character spans and emitting normalized text alongside offset-anchored IR chunks.
     \item \textbf{Stage 2 \& 3 (NER, Entity Linking \& Relation Extraction):} Executes scispaCy NER (\texttt{en\_ner\_bc5cdr\_md}, \texttt{en\_ner\_bionlp13cg\_md}) and SapBERT dense entity linking via FAISS ($\cos \ge 0.70$). UMLS semantic types from \texttt{semantic\_types.json} dynamically re-derive span ontology labels to prevent domain classification errors before HuatuoGPT-o1-72B extracts 27-relation medical triples and qualifiers.
@@ -246,10 +329,11 @@ The domain knowledge graph pipeline constructs a formal, ontology-grounded biome
     \item \textbf{Stage 7 (OWL-RL Reasoning):} Applies deterministic OWL 2 RL inference rules in-process via \texttt{owlrl} to materialize implicit taxonomic, inverse, and transitive relationships into \texttt{urn:graph:inferred}.
     \item \textbf{Stage 8 (Serving \& Subsetting):} Exports the reasoned knowledge base as N-Quads, hosts a SPARQL query endpoint, and supports document/section graph subsetting for downstream MCQ generation and semantic exploration.
 \end{enumerate}
+\end{sloppypar}
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=\linewidth]{images/mermaid_domain_kg.pdf}
+    \includegraphics[width=\linewidth]{images/flowcharts/mermaid_domain_kg.pdf}
     \caption{8-stage medkg pipeline: Parse $\rightarrow$ NER $\rightarrow$ Entity Linking
              $\rightarrow$ Post-coordination $\rightarrow$ RDF Assertion $\rightarrow$
              OWL-RL Reasoning $\rightarrow$ Serve (N-Quads / SPARQL / Subsets).}
@@ -295,7 +379,7 @@ Real-time student mastery calculation ($p_{\text{know}}$) on iPadOS & Swift Stan
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=\linewidth]{images/mermaid_deployment_topology.pdf}
+    \includegraphics[width=\linewidth]{images/flowcharts/mermaid_deployment_topology.pdf}
     \caption{Deployment topology: Offline Ingestion infrastructure (local Mac / remote GPU cluster)
              and Production Live Serving infrastructure (FastAPI + PostgreSQL + Neo4j).}
 \end{figure}
@@ -587,7 +671,7 @@ p_{\text{guess}}[c] = \frac{\sum_{s} \sum_{t:\,O_t=\text{Correct},\,C_t=c} \gamm
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=\linewidth]{images/mermaid_spaced_repetition.pdf}
+    \includegraphics[width=\linewidth]{images/flowcharts/mermaid_spaced_repetition.pdf}
     \caption{Dual-track spaced repetition: Quiz track (REVIEWING edge) and Flashcard track
              (SuperMemo self-rating intervals).}
 \end{figure}
@@ -607,22 +691,77 @@ The two tracks use distinct scheduling mechanics:
 
 \subsubsection*{Gamification Economy: Streaks, Energy \& Nudge Heuristics}
 
+The student learning experience is orchestrated through a gamified habit-loop on the iPadOS dashboard (Figure~\ref{fig:dashboard_screen}), connecting backend persistence in Neo4j to cognitive reinforcement heuristics:
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.88\linewidth]{images/application/dashboard.jpeg}
+    \caption{MediQuiz Student Dashboard: Integrating review nudge heuristics (due quiz questions and flashcards), active day streak tracking with recovery prompts, targeted weak-topic remediation cards, and live energy points ledger.}
+    \label{fig:dashboard_screen}
+\end{figure}
+
 \begin{enumerate}
+    \item \textbf{Review Nudge Recommendation Engine (\texttt{GET /students/me/nudge}):}
+          Aggregates total due quiz questions and due flashcards across the student's spaced repetition schedules (e.g., \textit{``54 due for review: 28 quiz questions and 26 flashcards''}), identifying the single item with $\min(\texttt{next\_review\_at})$ across both modes to populate the prominent top dashboard reminder banner with a direct one-tap review action.
     \item \textbf{Consecutive Streak Tracking (\texttt{src/student\_kg/streak.py}):}
-          Evaluates distinct calendar days in UTC where the student generated at least one
-          \texttt{QUIZ\_ANSWER} or \texttt{FLASHCARD\_\allowbreak REVIEW}. A gap $\geq 2$ days resets
-          \texttt{current\_streak = 0} while \texttt{previous\_streak} retains the broken length.
+          Evaluates distinct calendar days in UTC where the student generated at least one \texttt{QUIZ\_ANSWER} or \texttt{FLASHCARD\_\allowbreak REVIEW}. A gap $\geq 2$ days resets \texttt{current\_streak = 0} while \texttt{previous\_streak} retains the broken length, displaying an encouraging prompt (e.g., \textit{``Your 14-day streak ended. Start a new one today''}) alongside a weekly completion calendar.
     \item \textbf{Streak Restoration (\texttt{POST /students/me/streak/restore}):}
-          If the student missed exactly 1 day, they spend \textbf{10 Energy} units to bridge
-          the gap and restore their previous streak.
-    \item \textbf{Energy Ledger (\texttt{src/student\_kg/energy.py}):}
-          Earned: $+5$ per Quiz Session completion, $+1$ per Flashcard Review.
-          Spent: $-10$ per Streak Restore.
-    \item \textbf{Nudge Recommendation Engine (\texttt{GET /students/me/nudge}):}
-          Aggregates total due quiz questions and due flashcards, identifying the single item
-          with $\min(\texttt{next\_review\_at})$ across both modes to populate the top
-          dashboard reminder card.
+          If the student missed exactly 1 day, they spend \textbf{10 Energy} units to bridge the gap and restore their previous streak.
+    \item \textbf{Energy Points Ledger (\texttt{src/student\_kg/energy.py}):}
+          Earned: $+5$ per Quiz Session completion, $+1$ to $+2$ per Flashcard Review.
+          Spent: $-10$ per Streak Restore. The student's live balance (e.g., 158 Energy Points) is permanently visible on the sidebar profile widget.
+    \item \textbf{Targeted Weakness Remediation (``Areas to Improve''):}
+          The dashboard queries the student's lowest $p_{\text{know}}$ topics from Neo4j (\texttt{:MASTERS} edges) to display high-impact practice cards (e.g., \textit{Parathyroid Hormone Regulation --- Needs Work}) with a direct \textit{Practice Now} CTA button.
 \end{enumerate}
+
+% ────────────────────────────────────────────────────────────
+\subsection*{Responsible AI Integration}
+
+MediQuiz applies responsible AI principles across three dimensions: user data sovereignty,
+content licensing integrity, and transparency in algorithmic decision-making.
+Each principle is grounded in concrete system design choices rather than policy statements alone.
+
+\subsubsection*{On-Device Knowledge State}
+
+The student's primary knowledge representation --- the Bayesian posterior mastery
+estimate $p_{\text{know}}$ and its underlying attempt history --- is computed and
+persisted entirely on the student's own iPad. The BKT update rule executes within
+\texttt{BKTStore} in the Swift Standard Library with zero network dependency; the
+result is written synchronously to local \texttt{UserDefaults} before any background
+sync is dispatched to Neo4j. This means the student retains direct, local custody of
+their most sensitive learning signal at all times. No third-party inference endpoint,
+cloud ML service, or external model host ever processes individual mastery trajectories.
+The server receives only the final scalar $p_{\text{know}}$ value --- not the raw
+answer sequence used to derive it --- limiting the exposure of detailed performance data
+to the minimum necessary for aggregate parameter fitting.
+
+\subsubsection*{Authorised Content Sources \& Institutional Scope}
+
+All educational content ingested by MediQuiz is sourced exclusively from
+AccessMedicine, a licensed medical reference platform whose terms of use are
+complied with throughout the pipeline. The ingestion workflow applies strict
+faithfulness constraints: \texttt{document-rewriter} carries over textbook prose
+verbatim under a ``no paraphrasing'' instruction, and the offline pipeline is operated
+on institution-controlled infrastructure rather than third-party cloud services.
+Critically, the application is not publicly distributed; it is deployed solely within
+the university environment for enrolled medical students in Ciputra University, ensuring that the use of
+licensed materials remains within the permitted institutional scope. The question bank
+produced from these sources is stored in a private PostgreSQL instance and is not
+exposed to external systems or users.
+
+\subsubsection*{Explainable Student Mastery \& Bounded Scope}
+
+Learners are shown the confidence estimate behind each mastery label --- not a
+binary pass/fail verdict. The \textit{Topic Breakdown} modal (Figure~\ref{fig:topic_breakdown_view})
+surfaces the Bayesian posterior value, the recent attempt trajectory with per-attempt
+confidence weighting, and a plain-language explanation of why the estimate is
+discounted for lucky guesses (e.g.,\ \textit{``This score already discounts lucky
+guesses, so it reflects real gaps''}). The scope of explainability is deliberately
+bounded to the learning-progress domain: BKT explains skill-tracking logic only.
+The system makes no clinical diagnostic claims, offers no medical advice, and produces
+no patient-facing output. Every explanation text is derived from verified textbook
+provenance rather than generative LLM inference at serve time, preventing hallucination
+of clinical facts during live student interaction.
 
 % ────────────────────────────────────────────────────────────
 \subsection*{Operations, Runbook \& Local Setup}
@@ -694,7 +833,7 @@ To process new textbook PDFs through the multimodal pipeline:
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.85\linewidth]{images/mermaid_ingestion_runbook.pdf}
+    \includegraphics[width=0.85\linewidth]{images/flowcharts/mermaid_ingestion_runbook.pdf}
     \caption{Dataset ingestion runbook: PDF $\to$ ingest script $\to$ MCQ notebook $\to$
              PostgreSQL population.}
 \end{figure}
